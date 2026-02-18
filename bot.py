@@ -116,7 +116,7 @@ async def sl(interaction: discord.Interaction, url: str):
         return
 
     genius_url, genius_image =
-    get_genius_link(title,artist)
+    get_genius_link(title, artist)
 
 embed = discord.Embed(
     title=f"{title} — {artist}",
