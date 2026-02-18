@@ -42,7 +42,7 @@ def get_song_links(url):
         r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
             params={"url": url, "userCountry": "US"},
-            timeout=10
+            timeout=20
         )
         r.raise_for_status()
         data = r.json()
@@ -58,35 +58,38 @@ def get_song_links(url):
     title = data.get("entityTitle", "")
     artist = ""
 
-    for entity in data.get("entitiesByUniqueId", {}).values():
-        if entity.get("type") == "song":
-            artist = entity.get("artistName", "")
-            if not title:
-                title = entity.get("title", "")
-            break
+for entity in data.get("entitiesByUniqueId", {}).values():
+    if entity.get("type") == "song":
+        artist = entity.get("artistName", "")
+        if not title:
+            title = entity.get("title", "")
+        thumbnail = entity.get("thumbnailUrl") or entity.get("artworkUrl")
+        break
 
-    return links, title, artist
+return links, title, artist, thumbnail
 
 
 def get_genius_link(title, artist):
-    if not title or not artist:
-        return None
+    if not title:
+        return None, None
 
     try:
         r = requests.get(
             "https://api.genius.com/search",
             params={"q": f"{title} {artist}"},
             headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
-            timeout=10
+            timeout=20
         )
+
         if r.status_code == 200:
             hits = r.json()["response"]["hits"]
             if hits:
-                return hits[0]["result"].get("url")
-    except Exception:
-        pass
+                result = hits[0]["result"]
+                return result.get("url"), result.get("song_art_image_url")
+    except Exception as e:
+        print("Genius error:", e)
 
-    return None
+    return None, None
 
 
 @tree.command(
@@ -106,34 +109,38 @@ async def sl(interaction: discord.Interaction, url: str):
 
     await interaction.response.defer()
 
-    links, title, artist = get_song_links(url)
+    links, title, artist, thumbnail = get_song_links(url)
 
     if not links:
         await interaction.followup.send("Could not fetch links.")
         return
 
-    genius = get_genius_link(title, artist)
+    genius_url, genius_image =
+    get_genius_link(title,artist)
 
-    embed = discord.Embed(
-        title=f"{title} — {artist}",
-        color=discord.Color.orange()
-    )
+embed = discord.Embed(
+    title=f"{title} — {artist}",
+    color=discord.Color.orange()
+)
 
+if thumbnail:
+    embed.set_thumbnail(url=thumbnail)
+
+embed.add_field(
+    name="Platforms",
+    value="\n".join(links),
+    inline=False
+)
+
+if genius_url:
     embed.add_field(
-        name="Platforms",
-        value="\n".join(links[:10]),
+        name="Lyrics",
+        value=f"[Genius]({genius_url})",
         inline=False
     )
 
-    if genius:
-        embed.add_field(
-            name="Lyrics",
-            value=f"[Genius]({genius})",
-            inline=False
-        )
-
-    await interaction.followup.send(embed=embed)
-
+    if not thumbnail and genius_image:
+        embed.set_thumbnail(url=genius_image)
 
 @client.event
 async def on_ready():
