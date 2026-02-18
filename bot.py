@@ -6,6 +6,35 @@ from dotenv import load_dotenv
 from flask import Flask
 import threading
 
+def smart_split(text: str, limit: int = 1024):
+    lines = text.split("\n")
+    chunks = []
+    current_chunk = ""
+
+    for line in lines:
+        if len(line) > limit:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+
+            for i in range(0, len(line), limit):
+                chunks.append(line[i:i+limit])
+            continue
+
+        if len(current_chunk) + len(line) + 1 > limit:
+            chunks.append(current_chunk)
+            current_chunk = line
+        else:
+            if current_chunk:
+                current_chunk += "\n" + line
+            else:
+                current_chunk = line
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -126,10 +155,15 @@ async def sl(interaction: discord.Interaction, url: str):
     if thumbnail:
         embed.set_thumbnail(url=thumbnail)
 
-    embed.add_field(
-        name="Platforms",
-        value="\n".join(links),
-        inline=False
+    platform_text = "\n".join(links)
+    chunks = smart_split(platform_text)
+
+    for i, chunk in enumerate(chunks):
+        name = "Platforms" if i == 0 else f"Platforms (cont. {i+1})"
+        embed.add_field(
+            name=name,
+            value=chunk,
+            inline=False
     )
 
     if genius_url:
