@@ -2,12 +2,15 @@ import os
 import requests
 import discord
 from discord import app_commands
+from dotenv import load_dotenv
+
+# Load .env locally (Render ignores this safely)
+load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
-
-# 🔒 Put allowed channel IDs here (comma separated in env OR hardcode list)
-ALLOWED_CHANNELS = [int(x) for x in os.getenv("ALLOWED_CHANNELS", "").split(",") if x]
+GUILD_ID = int(os.getenv("GUILD_ID"))
+ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -33,28 +36,28 @@ def get_song_links(music_url):
                 name = platform.replace("_", " ").title()
                 links.append(f"[{name}]({data['url']})")
 
-    song_title = result.get("entityTitle", "")
+    title = result.get("entityTitle", "")
     artist = ""
 
     if "entitiesByUniqueId" in result:
         for entity in result["entitiesByUniqueId"].values():
             if entity.get("type") == "song":
                 artist = entity.get("artistName", "")
-                if not song_title:
-                    song_title = entity.get("title", "")
+                if not title:
+                    title = entity.get("title", "")
                 break
 
-    return links, song_title, artist
+    return links, title, artist
 
 
-def get_genius_link(song_title, artist):
-    if not song_title or not artist:
+def get_genius_link(title, artist):
+    if not title or not artist:
         return None
 
     try:
         response = requests.get(
             "https://api.genius.com/search",
-            params={"q": f"{song_title} {artist}"},
+            params={"q": f"{title} {artist}"},
             headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
             timeout=10
         )
@@ -68,14 +71,13 @@ def get_genius_link(song_title, artist):
     return None
 
 
-@tree.command(name="sl", description="Convert a music link to cross-platform links")
-@app_commands.describe(url="Paste a Spotify/Apple/YouTube music link")
+@tree.command(name="sl", description="Convert music link", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(url="Paste a Spotify/Apple/YouTube link")
 async def sl(interaction: discord.Interaction, url: str):
 
-    # 🔒 Channel restriction
-    if ALLOWED_CHANNELS and interaction.channel_id not in ALLOWED_CHANNELS:
+    if interaction.channel_id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message(
-            "This command is not allowed in this channel.",
+            "Not allowed in this channel.",
             ephemeral=True
         )
         return
@@ -85,7 +87,7 @@ async def sl(interaction: discord.Interaction, url: str):
     links, title, artist = get_song_links(url)
 
     if not links:
-        await interaction.followup.send("Could not fetch music links.")
+        await interaction.followup.send("Could not fetch links.")
         return
 
     genius_url = get_genius_link(title, artist)
@@ -113,8 +115,8 @@ async def sl(interaction: discord.Interaction, url: str):
 
 @client.event
 async def on_ready():
-    await tree.sync()
-    print(f"Logged in as {client.user}")
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f"Synced and logged in as {client.user}")
 
 
 client.run(TOKEN)
