@@ -107,7 +107,7 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
 
     genius_url = get_genius_link(title, artist)
 
-    platforms = list(song_data.get("linksByPlatform", {}).items())[:30]
+    platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
 
     platform_links = "\n".join(
         f"[{platform.replace('_',' ').title()}]({data['url']})"
