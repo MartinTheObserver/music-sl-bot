@@ -6,15 +6,10 @@ from discord import app_commands
 from dotenv import load_dotenv
 from flask import Flask
 import threading
-from typing import List, Tuple
 
 # ---------------------------
-# Helper Functions
+# Load Environment Variables
 # ---------------------------
-def chunked(iterable, size):
-    for i in range(0, len(iterable), size):
-        yield iterable[i:i + size]
-
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -23,7 +18,7 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
 
 # ---------------------------
-# Flask Web Server (Required by Render)
+# Flask Web Server (Render requirement)
 # ---------------------------
 app = Flask(__name__)
 
@@ -41,14 +36,15 @@ threading.Thread(target=run_flask, daemon=True).start()
 # Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
+intents.message_content = True  # REQUIRED for prefix commands
+
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree  # For slash commands
+tree = bot.tree
 
 # ---------------------------
-# Song Link Fetching
+# Fetch Song.link Data
 # ---------------------------
-async def fetch_song_links(query: str) -> dict:
-    """Fetch song.link API data by query (Spotify/YouTube/Apple)"""
+async def fetch_song_links(query: str):
     try:
         r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
@@ -58,44 +54,16 @@ async def fetch_song_links(query: str) -> dict:
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print("Error fetching song links:", e)
+        print("Song.link API Error:", e)
         return None
 
-def get_song_links(url: str) -> Tuple[List[str], str, str, str]:
-    try:
-        r = requests.get(
-            "https://api.song.link/v1-alpha.1/links",
-            params={"url": url, "userCountry": "US"},
-            timeout=20
-        )
-        r.raise_for_status()
-        data = r.json()
-    except Exception:
-        return None, None, None, None
+# ---------------------------
+# Fetch Genius Link
+# ---------------------------
+def get_genius_link(title: str, artist: str):
+    if not title or not GENIUS_API_KEY:
+        return None
 
-    links = []
-    for platform, info in data.get("linksByPlatform", {}).items():
-        if isinstance(info, dict) and "url" in info:
-            name = platform.replace("_", " ").title()
-            links.append(f"[{name}]({info['url']})")
-
-    title = data.get("entityTitle", "")
-    artist = ""
-    thumbnail = None
-
-    for entity in data.get("entitiesByUniqueId", {}).values():
-        if entity.get("type") == "song":
-            artist = entity.get("artistName", "")
-            if not title:
-                title = entity.get("title", "")
-            thumbnail = entity.get("thumbnailUrl") or entity.get("artworkUrl")
-            break
-
-    return links, title, artist, thumbnail
-
-def get_genius_link(title: str, artist: str) -> Tuple[str, str]:
-    if not title:
-        return None, None
     try:
         r = requests.get(
             "https://api.genius.com/search",
@@ -106,36 +74,86 @@ def get_genius_link(title: str, artist: str) -> Tuple[str, str]:
         if r.status_code == 200:
             hits = r.json()["response"]["hits"]
             if hits:
-                result = hits[0]["result"]
-                return result.get("url"), result.get("song_art_image_url")
+                return hits[0]["result"]["url"]
     except Exception as e:
-        print("Genius error:", e)
-    return None, None
+        print("Genius API Error:", e)
+
+    return None
 
 # ---------------------------
-# Embed Sending Logic (Shared)
+# Send Embed (Shared Logic)
 # ---------------------------
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
-    entity_id = song_data["entityUniqueId"]
-    links = list(song_data["linksByPlatform"].items())
-    chunks = list(chunked(links, 20))
+
+    # Find the song entity
+    entity_id = None
+    for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
+        if entity.get("type") == "song":
+            entity_id = uid
+            break
+
+    if not entity_id:
+        msg = "Could not parse song data."
+        if is_slash:
+            await ctx_or_interaction.followup.send(msg)
+        else:
+            await ctx_or_interaction.send(msg)
+        return
+
+    song = song_data["entitiesByUniqueId"][entity_id]
+    title = song.get("title", "Unknown Title")
+    artist = song.get("artistName", "Unknown Artist")
+    thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
+
+    genius_url = get_genius_link(title, artist)
+
+    platforms = list(song_data.get("linksByPlatform", {}).items())[:30]
+
+    platform_links = "\n".join(
+        f"[{platform.replace('_',' ').title()}]({data['url']})"
+        for platform, data in platforms
+        if isinstance(data, dict) and "url" in data
+    )
+
+    chunks = []
+    current_chunk = ""
+
+    for line in platform_links.split("\n"):
+        if len(current_chunk) + len(line) + 1 > 1000:
+            chunks.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk += ("\n" if current_chunk else "") + line
+
+    if current_chunk:
+        chunks.append(current_chunk)
 
     for i, chunk in enumerate(chunks):
+
         embed = discord.Embed(
-            title=song_data["entitiesByUniqueId"][entity_id]["title"],
-            description=song_data["entitiesByUniqueId"][entity_id]["artistName"],
+            title=title,
+            description=f"by {artist}",
             color=0x1DB954
         )
 
-        if i > 0:
-            embed.set_footer(text=f"Continued ({i+1}/{len(chunks)})")
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
 
-        for platform, data in chunk:
+        if genius_url and i == 0:
             embed.add_field(
-                name=platform.title(),
-                value=data["url"],
+                name="Lyrics",
+                value=f"[View on Genius]({genius_url})",
                 inline=False
             )
+
+        embed.add_field(
+            name="Listen On",
+            value=chunk,
+            inline=False
+        )
+
+        if len(chunks) > 1:
+            embed.set_footer(text=f"Page {i+1}/{len(chunks)}")
 
         if is_slash:
             await ctx_or_interaction.followup.send(embed=embed)
@@ -146,12 +164,28 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
 # Prefix Command (!sl)
 # ---------------------------
 @bot.command(name="sl")
+@commands.guild_only()
+@commands.has_permissions(send_messages=True)
 async def songlink(ctx, *, query: str):
+
+    # Restrict to allowed channel
+    if ctx.channel.id != ALLOWED_CHANNEL_ID:
+        return  # silently ignore or replace with message if desired
+
     song_data = await fetch_song_links(query)
     if not song_data:
         await ctx.send("Could not find links for that song.")
         return
+
     await send_songlink_embed(ctx, song_data)
+
+# Handle missing permission errors
+@songlink.error
+async def songlink_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("You don't have permission to use this command.")
+    elif isinstance(error, commands.NoPrivateMessage):
+        await ctx.send("This command cannot be used in DMs.")
 
 # ---------------------------
 # Slash Command (/sl)
@@ -163,21 +197,25 @@ async def songlink(ctx, *, query: str):
 )
 @app_commands.describe(query="Paste Spotify, Apple, or YouTube link")
 async def slash_songlink(interaction: discord.Interaction, query: str):
+
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message(
-            "Not allowed in this channel.", ephemeral=True
+            "Not allowed in this channel.",
+            ephemeral=True
         )
         return
 
     await interaction.response.defer()
+
     song_data = await fetch_song_links(query)
     if not song_data:
         await interaction.followup.send("Could not find links for that song.")
         return
+
     await send_songlink_embed(interaction, song_data, is_slash=True)
 
 # ---------------------------
-# Bot Events
+# Bot Ready Event
 # ---------------------------
 @bot.event
 async def on_ready():
