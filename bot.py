@@ -46,13 +46,10 @@ tree = bot.tree
 # Helper: Clean Song Title for Genius Search
 # ---------------------------
 def clean_song_title(title: str) -> str:
-    """
-    Strips common clutter from titles for Genius search:
-    - (feat. X), [Remix], emojis, extra spaces
-    """
     if not title:
         return ""
-    title = re.sub(r"(\(|\[).*?(feat\.|Remix).*?(\)|\])", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\(feat\.?.*?\)|\[feat\.?.*?\]", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\(.*?Remix.*?\)|\[.*?Remix.*?\]", "", title, flags=re.IGNORECASE)
     title = re.sub(r"[\[\]\(\)]", "", title)
     title = re.sub(r"[^\w\s&'-]", "", title)
     title = re.sub(r"\s+", " ", title)
@@ -75,11 +72,14 @@ async def fetch_song_links(query: str):
         return None
 
 # ---------------------------
-# Fetch Genius Link (Robust & Debug)
+# Robust Genius Link Fetch
 # ---------------------------
 def get_genius_link(title: str, artist: str):
-    if not title or not GENIUS_API_KEY:
-        print("Genius search skipped: missing title or API key")
+    if not title:
+        print("[Genius Warning] Missing song title.")
+        return None
+    if not GENIUS_API_KEY:
+        print("[Genius Warning] Genius API key not set. Genius search skipped.")
         return None
 
     clean_title = clean_song_title(title)
@@ -92,40 +92,43 @@ def get_genius_link(title: str, artist: str):
             headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
             timeout=20
         )
-        print(f"Genius search query: {query}")
-        print("Genius status code:", r.status_code)
 
-        if r.status_code != 200:
-            print("Genius API error:", r.text)
+        if r.status_code == 401:
+            print("[Genius Warning] Unauthorized: Check your Genius API key.")
+            return None
+        elif r.status_code != 200:
+            print(f"[Genius Warning] Genius API returned status {r.status_code}: {r.text}")
             return None
 
         data = r.json()
         hits = data.get("response", {}).get("hits", [])
 
         if not hits:
-            print("No Genius hits found for query:", query)
+            print(f"[Genius Warning] No hits found for query: '{query}'")
             return None
 
-        # Try to find the most relevant hit that matches title & artist roughly
         for hit in hits:
             result = hit.get("result", {})
             result_title = result.get("title", "").lower()
             result_artist = result.get("primary_artist", {}).get("name", "").lower()
             if clean_title.lower() in result_title and artist.lower() in result_artist:
+                print(f"[Genius Info] Found exact match: {result.get('url')}")
                 return result.get("url")
-        # Fallback: return first hit
-        return hits[0]["result"]["url"]
 
+        print(f"[Genius Info] No exact match. Using first hit: {hits[0]['result'].get('url')}")
+        return hits[0]["result"].get("url")
+
+    except requests.exceptions.RequestException as e:
+        print(f"[Genius Warning] Request exception: {e}")
+        return None
     except Exception as e:
-        print("Genius API Exception:", e)
+        print(f"[Genius Warning] Unexpected exception: {e}")
         return None
 
 # ---------------------------
 # Send Embed (Shared Logic)
 # ---------------------------
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
-
-    # Find the song entity
     entity_id = None
     for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
         if entity.get("type") == "song":
@@ -146,6 +149,7 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
 
     genius_url = get_genius_link(title, artist)
+    print("Genius URL found:", genius_url)
 
     platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
 
@@ -155,7 +159,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
         if isinstance(data, dict) and "url" in data
     )
 
-    # Split into chunks of <=1000 chars
     chunks = []
     current_chunk = ""
     for line in platform_links.split("\n"):
@@ -168,25 +171,15 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
         chunks.append(current_chunk)
 
     for i, chunk in enumerate(chunks):
-
-        # Embed: title clickable if Genius link exists
         embed = discord.Embed(
             title=title,
-            url=genius_url if genius_url else None,
+            url=genius_url if genius_url else None,  # Title links to Genius
             description=f"by {artist}",
             color=0x1DB954
         )
 
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
-
-        # Genius field only on first page
-        if genius_url and i == 0:
-            embed.add_field(
-                name="Lyrics",
-                value=f"[View on Genius]({genius_url})",
-                inline=False
-            )
 
         embed.add_field(
             name="Listen On",
@@ -209,7 +202,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
 @commands.guild_only()
 @commands.has_permissions(send_messages=True)
 async def songlink(ctx, *, query: str):
-
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
         return
 
@@ -237,7 +229,6 @@ async def songlink_error(ctx, error):
 )
 @app_commands.describe(query="Paste Spotify, Apple, or YouTube link")
 async def slash_songlink(interaction: discord.Interaction, query: str):
-
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message(
             "Not allowed in this channel.",
@@ -261,6 +252,13 @@ async def slash_songlink(interaction: discord.Interaction, query: str):
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
+
+    if not GENIUS_API_KEY:
+        print("[Startup Warning] Genius API key not set. Genius URLs will not work.")
+    else:
+        test_url = get_genius_link("Shape of You", "Ed Sheeran")
+        if not test_url:
+            print("[Startup Warning] Genius API key may be invalid or Genius search failed.")
 
 # ---------------------------
 # Run Bot
