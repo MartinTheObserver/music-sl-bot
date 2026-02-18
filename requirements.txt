@@ -1,2 +1,4 @@
-discord.py
+requdiscord.py
 requests
+python-dotenv
+flask
