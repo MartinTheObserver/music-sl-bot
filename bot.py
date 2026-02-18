@@ -1,15 +1,19 @@
 import os
 import requests
 import discord
+from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 from flask import Flask
 import threading
+from typing import List, Tuple
 
+# ---------------------------
+# Helper Functions
+# ---------------------------
 def chunked(iterable, size):
     for i in range(0, len(iterable), size):
         yield iterable[i:i + size]
-
 
 load_dotenv()
 
@@ -31,117 +35,33 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# Start Flask in background thread
 threading.Thread(target=run_flask).start()
 
 # ---------------------------
-# Discord Bot
+# Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
+bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree  # For slash commands
 
-
-def get_song_links(url):
+# ---------------------------
+# Song Link Fetching
+# ---------------------------
+async def fetch_song_links(query: str) -> dict:
+    """Fetch song.link API data by query (Spotify/YouTube/Apple)"""
     try:
         r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
-            params={"url": url, "userCountry": "US"},
+            params={"url": query, "userCountry": "US"},
             timeout=20
         )
         r.raise_for_status()
-        data = r.json()
-    except Exception:
-        return None, None, None, None
-
-    links = []
-    for platform, info in data.get("linksByPlatform", {}).items():
-        if isinstance(info, dict) and "url" in info:
-            name = platform.replace("_", " ").title()
-            links.append(f"[{name}]({info['url']})")
-
-    title = data.get("entityTitle", "")
-    artist = ""
-    thumbnail = None
-
-    for entity in data.get("entitiesByUniqueId", {}).values():
-        if entity.get("type") == "song":
-            artist = entity.get("artistName", "")
-            if not title:
-                title = entity.get("title", "")
-            thumbnail = entity.get("thumbnailUrl") or entity.get("artworkUrl")
-            break
-
-    return links, title, artist, thumbnail
-
-
-def get_genius_link(title, artist):
-    if not title:
-        return None, None
-
-    try:
-        r = requests.get(
-            "https://api.genius.com/search",
-            params={"q": f"{title} {artist}"},
-            headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
-            timeout=20
-        )
-
-        if r.status_code == 200:
-            hits = r.json()["response"]["hits"]
-            if hits:
-                result = hits[0]["result"]
-                return result.get("url"), result.get("song_art_image_url")
+        return r.json()
     except Exception as e:
-        print("Genius error:", e)
+        print("Error fetching song links:", e)
+        return None
 
-    return None, None
-
-
-@tree.command(
-    name="sl",
-    description="Convert music link",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(url="Paste a Spotify/Apple/YouTube link")
-async def sl(interaction: discord.Interaction, url: str):
-
-    if interaction.channel_id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message(
-            "Not allowed in this channel.",
-            ephemeral=True
-        )
-        return
-
-    await interaction.response.defer()
-
-    links, title, artist, thumbnail = get_song_links(url)
-
-    if not links:
-        await interaction.followup.send("Could not fetch links.")
-        return
-
-    genius_url, genius_image = get_genius_link(title, artist)
-
-    embed = discord.Embed(
-        title=f"{title} — {artist}",
-        color=discord.Color.orange()
-    )
-
-    if thumbnail:
-        embed.set_thumbnail(url=thumbnail)
-
-    embed.add_field(
-        name="Platforms",
-        value="\n".join(links),
-        inline=False
-    )
-
-    if genius_url:
-        embed.add_field(
-            name="Lyrics",
-            value=f"[Genius]({genius_url})",
-            inline=False
+def get_song_links(url: str) -> Tuple[List[str], str, str, str]:
         )
 
         if not thumbnail and genius_image:
