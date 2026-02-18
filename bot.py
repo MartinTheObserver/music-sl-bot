@@ -7,6 +7,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 from flask import Flask
 import threading
+import asyncio
 
 # ---------------------------
 # Load Environment Variables
@@ -17,6 +18,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
+DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))  # Your Discord ID for ephemeral debug
 
 # ---------------------------
 # Flask Web Server (Render requirement)
@@ -43,6 +45,24 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # ---------------------------
+# Helper: Ephemeral Debug Sender
+# ---------------------------
+async def debug_send(ctx_or_interaction, msg, is_slash=False, ephemeral=True, debug_enabled=True):
+    """Send ephemeral debug messages only if debug_enabled and DEBUG_USER_ID matches"""
+    if not debug_enabled:
+        return
+    try:
+        user_id = getattr(ctx_or_interaction, "author", None) or getattr(ctx_or_interaction, "user", None)
+        if not user_id or user_id.id != DEBUG_USER_ID:
+            return
+        if is_slash:
+            await ctx_or_interaction.followup.send(f"```DEBUG: {msg}```", ephemeral=ephemeral)
+        else:
+            await ctx_or_interaction.send(f"```DEBUG: {msg}```")
+    except Exception as e:
+        print(f"[DEBUG ERROR] Could not send debug message: {e}")
+
+# ---------------------------
 # Helper: Clean Song Title for Genius Search
 # ---------------------------
 def clean_song_title(title: str) -> str:
@@ -56,9 +76,10 @@ def clean_song_title(title: str) -> str:
     return title.strip()
 
 # ---------------------------
-# Fetch Song.link Data
+# Fetch Song.link Data with Debug
 # ---------------------------
-async def fetch_song_links(query: str):
+async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
+    await debug_send(ctx_or_interaction, f"Fetching Song.link data for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled)
     try:
         r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
@@ -66,20 +87,21 @@ async def fetch_song_links(query: str):
             timeout=20
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        await debug_send(ctx_or_interaction, f"Song.link API returned keys: {list(data.keys())}", is_slash=is_slash, debug_enabled=debug_enabled)
+        return data
+    except requests.exceptions.RequestException as e:
+        await debug_send(ctx_or_interaction, f"Song.link API request error: {e}", is_slash=is_slash, debug_enabled=debug_enabled)
+        return None
     except Exception as e:
-        print("Song.link API Error:", e)
+        await debug_send(ctx_or_interaction, f"Song.link unexpected error: {e}", is_slash=is_slash, debug_enabled=debug_enabled)
         return None
 
 # ---------------------------
-# Robust Genius Link Fetch
+# Robust Genius Link Fetch with Full Debug
 # ---------------------------
-def get_genius_link(title: str, artist: str):
-    if not title:
-        print("[Genius Warning] Missing song title.")
-        return None
-    if not GENIUS_API_KEY:
-        print("[Genius Warning] Genius API key not set. Genius search skipped.")
+def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
+    if not title or not GENIUS_API_KEY:
         return None
 
     clean_title = clean_song_title(title)
@@ -93,18 +115,18 @@ def get_genius_link(title: str, artist: str):
             timeout=20
         )
 
-        if r.status_code == 401:
-            print("[Genius Warning] Unauthorized: Check your Genius API key.")
-            return None
-        elif r.status_code != 200:
-            print(f"[Genius Warning] Genius API returned status {r.status_code}: {r.text}")
-            return None
+        if ctx_or_interaction and debug_enabled:
+            if r.status_code == 401:
+                asyncio.create_task(debug_send(ctx_or_interaction, f"Genius API 401 Unauthorized for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled))
+                return None
+            elif r.status_code != 200:
+                asyncio.create_task(debug_send(ctx_or_interaction, f"Genius API returned status {r.status_code}: {r.text}", is_slash=is_slash, debug_enabled=debug_enabled))
 
         data = r.json()
         hits = data.get("response", {}).get("hits", [])
 
-        if not hits:
-            print(f"[Genius Warning] No hits found for query: '{query}'")
+        if not hits and ctx_or_interaction and debug_enabled:
+            asyncio.create_task(debug_send(ctx_or_interaction, f"No Genius hits found for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled))
             return None
 
         for hit in hits:
@@ -112,23 +134,29 @@ def get_genius_link(title: str, artist: str):
             result_title = result.get("title", "").lower()
             result_artist = result.get("primary_artist", {}).get("name", "").lower()
             if clean_title.lower() in result_title and artist.lower() in result_artist:
-                print(f"[Genius Info] Found exact match: {result.get('url')}")
+                if ctx_or_interaction and debug_enabled:
+                    asyncio.create_task(debug_send(ctx_or_interaction, f"Found exact Genius match: {result.get('url')}", is_slash=is_slash, debug_enabled=debug_enabled))
                 return result.get("url")
 
-        print(f"[Genius Info] No exact match. Using first hit: {hits[0]['result'].get('url')}")
-        return hits[0]["result"].get("url")
+        if hits and ctx_or_interaction and debug_enabled:
+            asyncio.create_task(debug_send(ctx_or_interaction, f"No exact Genius match. Using first hit: {hits[0]['result'].get('url')}", is_slash=is_slash, debug_enabled=debug_enabled))
+
+        return hits[0]["result"].get("url") if hits else None
 
     except requests.exceptions.RequestException as e:
-        print(f"[Genius Warning] Request exception: {e}")
+        if ctx_or_interaction and debug_enabled:
+            asyncio.create_task(debug_send(ctx_or_interaction, f"Genius API request exception: {e}", is_slash=is_slash, debug_enabled=debug_enabled))
         return None
     except Exception as e:
-        print(f"[Genius Warning] Unexpected exception: {e}")
+        if ctx_or_interaction and debug_enabled:
+            asyncio.create_task(debug_send(ctx_or_interaction, f"Genius unexpected exception: {e}", is_slash=is_slash, debug_enabled=debug_enabled))
         return None
 
 # ---------------------------
-# Send Embed (Shared Logic)
+# Send Embed with Debug
 # ---------------------------
-async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
+async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, debug_enabled=True):
+    await debug_send(ctx_or_interaction, f"Parsing Song.link entities...", is_slash=is_slash, debug_enabled=debug_enabled)
     entity_id = None
     for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
         if entity.get("type") == "song":
@@ -148,10 +176,11 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     artist = song.get("artistName", "Unknown Artist")
     thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
 
-    genius_url = get_genius_link(title, artist)
-    print("Genius URL found:", genius_url)
+    genius_url = get_genius_link(title, artist, ctx_or_interaction, is_slash, debug_enabled)
+    await debug_send(ctx_or_interaction, f"Genius URL used: {genius_url}", is_slash=is_slash, debug_enabled=debug_enabled)
 
     platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
+    await debug_send(ctx_or_interaction, f"Found {len(platforms)} platform links.", is_slash=is_slash, debug_enabled=debug_enabled)
 
     platform_links = "\n".join(
         f"[{platform.replace('_',' ').title()}]({data['url']})"
@@ -170,10 +199,12 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     if current_chunk:
         chunks.append(current_chunk)
 
+    await debug_send(ctx_or_interaction, f"Split links into {len(chunks)} embed page(s).", is_slash=is_slash, debug_enabled=debug_enabled)
+
     for i, chunk in enumerate(chunks):
         embed = discord.Embed(
             title=title,
-            url=genius_url if genius_url else None,  # Title links to Genius
+            url=genius_url if genius_url else None,
             description=f"by {artist}",
             color=0x1DB954
         )
@@ -202,15 +233,20 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
 @commands.guild_only()
 @commands.has_permissions(send_messages=True)
 async def songlink(ctx, *, query: str):
+    debug_enabled = False
+    if query.lower().startswith("debug "):
+        debug_enabled = True
+        query = query[6:].strip()
+
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
         return
 
-    song_data = await fetch_song_links(query)
+    song_data = await fetch_song_links(query, ctx, is_slash=False, debug_enabled=debug_enabled)
     if not song_data:
         await ctx.send("Could not find links for that song.")
         return
 
-    await send_songlink_embed(ctx, song_data)
+    await send_songlink_embed(ctx, song_data, is_slash=False, debug_enabled=debug_enabled)
 
 @songlink.error
 async def songlink_error(ctx, error):
@@ -227,8 +263,8 @@ async def songlink_error(ctx, error):
     description="Get song links",
     guild=discord.Object(id=GUILD_ID)
 )
-@app_commands.describe(query="Paste Spotify, Apple, or YouTube link")
-async def slash_songlink(interaction: discord.Interaction, query: str):
+@app_commands.describe(query="Paste Spotify, Apple, or YouTube link", debug="Show debug messages for yourself")
+async def slash_songlink(interaction: discord.Interaction, query: str, debug: bool = False):
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message(
             "Not allowed in this channel.",
@@ -237,13 +273,44 @@ async def slash_songlink(interaction: discord.Interaction, query: str):
         return
 
     await interaction.response.defer()
-
-    song_data = await fetch_song_links(query)
+    song_data = await fetch_song_links(query, interaction, is_slash=True, debug_enabled=debug)
     if not song_data:
         await interaction.followup.send("Could not find links for that song.")
         return
 
-    await send_songlink_embed(interaction, song_data, is_slash=True)
+    await send_songlink_embed(interaction, song_data, is_slash=True, debug_enabled=debug)
+
+# ---------------------------
+# Genius API Test on Startup
+# ---------------------------
+async def validate_genius_key():
+    if not GENIUS_API_KEY:
+        print("[Startup Warning] Genius API key not set.")
+        return
+    try:
+        r = requests.get(
+            "https://api.genius.com/search",
+            params={"q": "Shape of You Ed Sheeran"},
+            headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+            timeout=20
+        )
+        if r.status_code == 401:
+            user = await bot.fetch_user(DEBUG_USER_ID)
+            await debug_send(user, "Genius API key is invalid (401 Unauthorized)", debug_enabled=True)
+        elif r.status_code != 200:
+            user = await bot.fetch_user(DEBUG_USER_ID)
+            await debug_send(user, f"Genius API returned {r.status_code}: {r.text}", debug_enabled=True)
+        else:
+            data = r.json()
+            hits = data.get("response", {}).get("hits", [])
+            user = await bot.fetch_user(DEBUG_USER_ID)
+            if hits:
+                await debug_send(user, f"Genius API key validated successfully. Found {len(hits)} hit(s) for test search.", debug_enabled=True)
+            else:
+                await debug_send(user, "Genius API key seems valid but no hits returned for test search.", debug_enabled=True)
+    except Exception as e:
+        user = await bot.fetch_user(DEBUG_USER_ID)
+        await debug_send(user, f"Exception during Genius API validation: {e}", debug_enabled=True)
 
 # ---------------------------
 # Bot Ready Event
@@ -252,13 +319,8 @@ async def slash_songlink(interaction: discord.Interaction, query: str):
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
-
-    if not GENIUS_API_KEY:
-        print("[Startup Warning] Genius API key not set. Genius URLs will not work.")
-    else:
-        test_url = get_genius_link("Shape of You", "Ed Sheeran")
-        if not test_url:
-            print("[Startup Warning] Genius API key may be invalid or Genius search failed.")
+    # Run Genius API validation asynchronously
+    asyncio.create_task(validate_genius_key())
 
 # ---------------------------
 # Run Bot
