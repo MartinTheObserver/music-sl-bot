@@ -2,47 +2,68 @@ import os
 import requests
 import discord
 from discord import app_commands
+from dotenv import load_dotenv
+from flask import Flask
+import threading
 
+load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
 
+# ---------------------------
+# Flask Web Server (Required by Render)
+# ---------------------------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is alive."
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# Start Flask in background thread
+threading.Thread(target=run_flask).start()
+
+# ---------------------------
+# Discord Bot
+# ---------------------------
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
-def get_song_links(music_url):
+def get_song_links(url):
     try:
-        response = requests.get(
+        r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
-            params={"url": music_url, "userCountry": "US"},
+            params={"url": url, "userCountry": "US"},
             timeout=10
         )
-        response.raise_for_status()
-        result = response.json()
+        r.raise_for_status()
+        data = r.json()
     except Exception:
         return None, None, None
 
     links = []
-    if "linksByPlatform" in result:
-        for platform, data in result["linksByPlatform"].items():
-            if isinstance(data, dict) and "url" in data:
-                name = platform.replace("_", " ").title()
-                links.append(f"[{name}]({data['url']})")
+    for platform, info in data.get("linksByPlatform", {}).items():
+        if isinstance(info, dict) and "url" in info:
+            name = platform.replace("_", " ").title()
+            links.append(f"[{name}]({info['url']})")
 
-    title = result.get("entityTitle", "")
+    title = data.get("entityTitle", "")
     artist = ""
 
-    if "entitiesByUniqueId" in result:
-        for entity in result["entitiesByUniqueId"].values():
-            if entity.get("type") == "song":
-                artist = entity.get("artistName", "")
-                if not title:
-                    title = entity.get("title", "")
-                break
+    for entity in data.get("entitiesByUniqueId", {}).values():
+        if entity.get("type") == "song":
+            artist = entity.get("artistName", "")
+            if not title:
+                title = entity.get("title", "")
+            break
 
     return links, title, artist
 
@@ -52,14 +73,14 @@ def get_genius_link(title, artist):
         return None
 
     try:
-        response = requests.get(
+        r = requests.get(
             "https://api.genius.com/search",
             params={"q": f"{title} {artist}"},
             headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
             timeout=10
         )
-        if response.status_code == 200:
-            hits = response.json()["response"]["hits"]
+        if r.status_code == 200:
+            hits = r.json()["response"]["hits"]
             if hits:
                 return hits[0]["result"].get("url")
     except Exception:
@@ -68,7 +89,11 @@ def get_genius_link(title, artist):
     return None
 
 
-@tree.command(name="sl", description="Convert music link", guild=discord.Object(id=GUILD_ID))
+@tree.command(
+    name="sl",
+    description="Convert music link",
+    guild=discord.Object(id=GUILD_ID)
+)
 @app_commands.describe(url="Paste a Spotify/Apple/YouTube link")
 async def sl(interaction: discord.Interaction, url: str):
 
@@ -87,7 +112,7 @@ async def sl(interaction: discord.Interaction, url: str):
         await interaction.followup.send("Could not fetch links.")
         return
 
-    genius_url = get_genius_link(title, artist)
+    genius = get_genius_link(title, artist)
 
     embed = discord.Embed(
         title=f"{title} — {artist}",
@@ -100,10 +125,10 @@ async def sl(interaction: discord.Interaction, url: str):
         inline=False
     )
 
-    if genius_url:
+    if genius:
         embed.add_field(
             name="Lyrics",
-            value=f"[Genius]({genius_url})",
+            value=f"[Genius]({genius})",
             inline=False
         )
 
@@ -111,6 +136,12 @@ async def sl(interaction: discord.Interaction, url: str):
 
 
 @client.event
+async def on_ready():
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f"Logged in as {client.user}")
+
+
+client.run(TOKEN)@client.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Synced and logged in as {client.user}")
