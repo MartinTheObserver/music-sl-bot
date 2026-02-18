@@ -6,6 +6,11 @@ from dotenv import load_dotenv
 from flask import Flask
 import threading
 
+def chunked(iterable, size):
+    for i in range(0, len(iterable), size):
+        yield iterable[i:i + size]
+
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
