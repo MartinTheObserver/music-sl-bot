@@ -115,8 +115,7 @@ async def sl(interaction: discord.Interaction, url: str):
         await interaction.followup.send("Could not fetch links.")
         return
 
-    genius_url, genius_image =
-    get_genius_link(title, artist)
+    genius_url, genius_image = get_genius_link(title, artist)
 
 embed = discord.Embed(
     title=f"{title} — {artist}",
