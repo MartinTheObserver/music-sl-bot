@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import discord
 from discord.ext import commands
@@ -42,6 +43,22 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # ---------------------------
+# Helper: Clean Song Title for Genius Search
+# ---------------------------
+def clean_song_title(title: str) -> str:
+    """
+    Strips common clutter from titles for Genius search:
+    - (feat. X), [Remix], emojis, extra spaces
+    """
+    if not title:
+        return ""
+    title = re.sub(r"(\(|\[).*?(feat\.|Remix).*?(\)|\])", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"[\[\]\(\)]", "", title)
+    title = re.sub(r"[^\w\s&'-]", "", title)
+    title = re.sub(r"\s+", " ", title)
+    return title.strip()
+
+# ---------------------------
 # Fetch Song.link Data
 # ---------------------------
 async def fetch_song_links(query: str):
@@ -58,27 +75,50 @@ async def fetch_song_links(query: str):
         return None
 
 # ---------------------------
-# Fetch Genius Link
+# Fetch Genius Link (Robust & Debug)
 # ---------------------------
 def get_genius_link(title: str, artist: str):
     if not title or not GENIUS_API_KEY:
+        print("Genius search skipped: missing title or API key")
         return None
+
+    clean_title = clean_song_title(title)
+    query = f"{clean_title} {artist}"
 
     try:
         r = requests.get(
             "https://api.genius.com/search",
-            params={"q": f"{title} {artist}"},
+            params={"q": query},
             headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
             timeout=20
         )
-        if r.status_code == 200:
-            hits = r.json()["response"]["hits"]
-            if hits:
-                return hits[0]["result"]["url"]
-    except Exception as e:
-        print("Genius API Error:", e)
+        print(f"Genius search query: {query}")
+        print("Genius status code:", r.status_code)
 
-    return None
+        if r.status_code != 200:
+            print("Genius API error:", r.text)
+            return None
+
+        data = r.json()
+        hits = data.get("response", {}).get("hits", [])
+
+        if not hits:
+            print("No Genius hits found for query:", query)
+            return None
+
+        # Try to find the most relevant hit that matches title & artist roughly
+        for hit in hits:
+            result = hit.get("result", {})
+            result_title = result.get("title", "").lower()
+            result_artist = result.get("primary_artist", {}).get("name", "").lower()
+            if clean_title.lower() in result_title and artist.lower() in result_artist:
+                return result.get("url")
+        # Fallback: return first hit
+        return hits[0]["result"]["url"]
+
+    except Exception as e:
+        print("Genius API Exception:", e)
+        return None
 
 # ---------------------------
 # Send Embed (Shared Logic)
@@ -115,23 +155,24 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
         if isinstance(data, dict) and "url" in data
     )
 
+    # Split into chunks of <=1000 chars
     chunks = []
     current_chunk = ""
-
     for line in platform_links.split("\n"):
         if len(current_chunk) + len(line) + 1 > 1000:
             chunks.append(current_chunk)
             current_chunk = line
         else:
             current_chunk += ("\n" if current_chunk else "") + line
-
     if current_chunk:
         chunks.append(current_chunk)
 
     for i, chunk in enumerate(chunks):
 
+        # Embed: title clickable if Genius link exists
         embed = discord.Embed(
             title=title,
+            url=genius_url if genius_url else None,
             description=f"by {artist}",
             color=0x1DB954
         )
@@ -139,6 +180,7 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
 
+        # Genius field only on first page
         if genius_url and i == 0:
             embed.add_field(
                 name="Lyrics",
@@ -168,9 +210,8 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
 @commands.has_permissions(send_messages=True)
 async def songlink(ctx, *, query: str):
 
-    # Restrict to allowed channel
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
-        return  # silently ignore or replace with message if desired
+        return
 
     song_data = await fetch_song_links(query)
     if not song_data:
@@ -179,7 +220,6 @@ async def songlink(ctx, *, query: str):
 
     await send_songlink_embed(ctx, song_data)
 
-# Handle missing permission errors
 @songlink.error
 async def songlink_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
