@@ -2,10 +2,7 @@ import os
 import requests
 import discord
 from discord import app_commands
-from dotenv import load_dotenv
 
-# Load .env locally (Render ignores this safely)
-load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
