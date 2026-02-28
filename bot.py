@@ -7,10 +7,10 @@ import requests
 import discord
 from discord.ext import commands
 from discord import app_commands
+from discord.ui import Modal, TextInput
 from dotenv import load_dotenv
 from flask import Flask
 import threading
-import asyncio
 
 # ---------------------------
 # Load Environment Variables
@@ -58,13 +58,13 @@ def get_weird_law():
     return law_entry.get("state", "Unknown"), law_entry.get("law", "No law found.")
 
 # ---------------------------
-# Helper: Random Hex Color
+# Random Color
 # ---------------------------
 def random_hex_color():
     return random.randint(0, 0xFFFFFF)
 
 # ---------------------------
-# Helper: Ephemeral Debug
+# Debug Function
 # ---------------------------
 async def debug_send(ctx_or_interaction, msg, is_slash=False, ephemeral=True):
     user_id = getattr(ctx_or_interaction, "author", None) or getattr(ctx_or_interaction, "user", None)
@@ -207,7 +207,7 @@ async def fetch_quote():
         return "No quote available."
 
 # ---------------------------
-# Define Word
+# Define Word API
 # ---------------------------
 async def define_word(word: str):
     try:
@@ -222,7 +222,7 @@ async def define_word(word: str):
     return "No definition found."
 
 # ---------------------------
-# Wiki Summary
+# Wiki Summary API
 # ---------------------------
 async def wiki_summary(query: str):
     try:
@@ -234,44 +234,54 @@ async def wiki_summary(query: str):
         return "SONGLINK: ❌ No article found."
 
 # ---------------------------
+# Define Modal
+# ---------------------------
+class DefineModal(Modal, title="Define a Word"):
+    word = TextInput(label="Word to define", placeholder="Enter a word", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        definition = await define_word(self.word.value)
+        embed = discord.Embed(title=f"Define: {self.word.value}", description=definition, color=random_hex_color())
+        await interaction.followup.send(embed=embed)
+
+# ---------------------------
+# Wiki Modal
+# ---------------------------
+class WikiModal(Modal, title="Wiki Summary"):
+    query = TextInput(label="Topic", placeholder="Enter topic", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        summary = await wiki_summary(self.query.value)
+        embed = discord.Embed(title=f"Wiki: {self.query.value}", description=summary, color=random_hex_color())
+        await interaction.followup.send(embed=embed)
+
+# ---------------------------
 # ECM Button View
 # ---------------------------
 class ECMView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Buttons
         self.add_item(discord.ui.Button(label="Define", style=discord.ButtonStyle.primary, custom_id="define"))
         self.add_item(discord.ui.Button(label="Wiki", style=discord.ButtonStyle.primary, custom_id="wiki"))
         self.add_item(discord.ui.Button(label="Weird Law", style=discord.ButtonStyle.danger, custom_id="weird_law"))
         self.add_item(discord.ui.Button(label="Useless Fact", style=discord.ButtonStyle.secondary, custom_id="useless_fact"))
         self.add_item(discord.ui.Button(label="Random Quote", style=discord.ButtonStyle.success, custom_id="quote"))
 
-    @discord.ui.button(label="Placeholder", style=discord.ButtonStyle.secondary, disabled=True)
-    async def dummy(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return True
-
-    async def on_timeout(self):
-        pass
-
-# ---------------------------
-# ECM Button Callbacks
-# ---------------------------
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
-    if not interaction.type == discord.InteractionType.component:
+    if interaction.type != discord.InteractionType.component:
         return
     cid = interaction.data.get("custom_id")
     await interaction.response.defer()
     if cid == "quote":
-        quote_text = await fetch_quote()
-        await interaction.followup.send(embed=discord.Embed(title="Quote", description=quote_text, color=random_hex_color()))
+        text = await fetch_quote()
+        await interaction.followup.send(embed=discord.Embed(title="Quote", description=text, color=random_hex_color()))
     elif cid == "define":
-        await interaction.followup.send("Use `define: word` in chat to get a definition.")  # user will type
+        await interaction.response.send_modal(DefineModal())
     elif cid == "wiki":
-        await interaction.followup.send("Use `wiki: query` in chat to get a summary.")  # user will type
+        await interaction.response.send_modal(WikiModal())
     elif cid == "weird_law":
         state, law = get_weird_law()
         await interaction.followup.send(embed=discord.Embed(title=f"Weird Law: {state}", description=law, color=random_hex_color()))
@@ -291,7 +301,7 @@ async def ecm_command(interaction: discord.Interaction):
     await interaction.response.send_message("Welcome to ECM Entertainment! Choose an option below:", view=view)
 
 # ---------------------------
-# Bot Ready Event
+# Bot Ready
 # ---------------------------
 @bot.event
 async def on_ready():
