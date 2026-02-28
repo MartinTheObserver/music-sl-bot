@@ -9,8 +9,6 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ui import Modal, TextInput
 from dotenv import load_dotenv
-from flask import Flask
-import threading
 
 # ---------------------------
 # Load Environment Variables
@@ -23,64 +21,140 @@ ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
 DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))
 
 # ---------------------------
-# Flask Web Server
+# Load Weird Laws JSON
 # ---------------------------
-app = Flask(__name__)
-@app.route("/")
-def home():
-    return "Bot is alive."
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-threading.Thread(target=run_flask, daemon=True).start()
+with open("weirdlaws.json", "r", encoding="utf-8") as f:
+    WEIRD_LAWS = json.load(f)
 
 # ---------------------------
 # Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # REQUIRED for prefix commands
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# ---------------------------
-# Load Weird Laws
-# ---------------------------
-WEIRD_LAWS = []
-weird_laws_path = os.path.join(os.path.dirname(__file__), "weirdlaws.json")
-if os.path.exists(weird_laws_path):
-    with open(weird_laws_path, "r", encoding="utf-8") as f:
-        WEIRD_LAWS = json.load(f)
+# ============================
+# Utility Functions
+# ============================
 
 def get_weird_law():
     if not WEIRD_LAWS:
         return "Unknown", "No weird laws loaded."
-    law_entry = random.choice(WEIRD_LAWS)
-    return law_entry.get("state", "Unknown"), law_entry.get("law", "No law found.")
+    state = random.choice(list(WEIRD_LAWS.keys()))
+    law = random.choice(WEIRD_LAWS[state])
+    return state, law
 
-# ---------------------------
-# Random Color
-# ---------------------------
 def random_hex_color():
     return random.randint(0, 0xFFFFFF)
 
-# ---------------------------
-# Debug Function
-# ---------------------------
-async def debug_send(ctx_or_interaction, msg, is_slash=False, ephemeral=True):
-    user_id = getattr(ctx_or_interaction, "author", None) or getattr(ctx_or_interaction, "user", None)
-    if not user_id or user_id.id != DEBUG_USER_ID:
-        return
-    try:
-        if is_slash:
-            await ctx_or_interaction.followup.send(f"```DEBUG: {msg}```", ephemeral=ephemeral)
-        else:
-            await ctx_or_interaction.send(f"```DEBUG: {msg}```")
-    except:
-        pass
+async def get_random_quote():
+    async with aiohttp.ClientSession() as session:
+        try:
+            data = await session.get("https://zenquotes.io/api/random")
+            j = await data.json()
+            return j[0].get("q", "No quote available.")
+        except:
+            return "Could not fetch quote."
 
-# ---------------------------
-# Song.link + Genius Helpers
-# ---------------------------
+async def get_wiki_summary(query):
+    safe = query.replace(" ", "_")
+    async with aiohttp.ClientSession() as session:
+        try:
+            data = await session.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{safe}")
+            j = await data.json()
+            return j.get("extract", "No article found.")
+        except:
+            return "Could not fetch wiki article."
+
+async def get_definition(word):
+    async with aiohttp.ClientSession() as session:
+        try:
+            data = await session.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}")
+            j = await data.json()
+            meaning = j[0]["meanings"][0]["definitions"][0]["definition"]
+            return meaning
+        except:
+            return "No definition found."
+
+# ============================
+# ECM Buttons
+# ============================
+
+class ECMView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Weird Law", style=discord.ButtonStyle.danger)
+    async def weirdlaw_button(self, interaction, button):
+        state, law = get_weird_law()
+        embed = discord.Embed(
+            title=f"Weird Law — {state}",
+            description=law,
+            color=random_hex_color()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @discord.ui.button(label="Wiki", style=discord.ButtonStyle.primary)
+    async def wiki_button(self, interaction, button):
+        class WikiModal(Modal, title="Wikipedia Search"):
+            query = TextInput(label="Topic")
+
+            async def on_submit(self, modal_interaction):
+                summary = await get_wiki_summary(self.query.value)
+                embed = discord.Embed(
+                    title=f"Wikipedia: {self.query.value}",
+                    description=summary,
+                    color=random_hex_color()
+                )
+                await modal_interaction.response.send_message(embed=embed)
+
+        await interaction.response.send_modal(WikiModal())
+
+    @discord.ui.button(label="Define", style=discord.ButtonStyle.secondary)
+    async def define_button(self, interaction, button):
+        class DefineModal(Modal, title="Define Word"):
+            term = TextInput(label="Word")
+
+            async def on_submit(self, modal_interaction):
+                meaning = await get_definition(self.term.value)
+                embed = discord.Embed(
+                    title=f"Definition — {self.term.value}",
+                    description=meaning,
+                    color=random_hex_color()
+                )
+                await modal_interaction.response.send_message(embed=embed)
+
+        await interaction.response.send_modal(DefineModal())
+
+    @discord.ui.button(label="Quote", style=discord.ButtonStyle.success)
+    async def quote_button(self, interaction, button):
+        text = await get_random_quote()
+        embed = discord.Embed(
+            title="Quote",
+            description=text,
+            color=random_hex_color()
+        )
+        await interaction.response.send_message(embed=embed)
+
+# ============================
+# /ecm Slash Command
+# ============================
+
+@tree.command(
+    name="ecm",
+    description="Open ECM Entertainment menu",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def ecm(interaction: discord.Interaction):
+    view = ECMView()
+    await interaction.response.send_message("Select an option:", view=view)
+
+# ============================
+# Original Music Bot Code
+# Integrated from your GitHub
+# ============================
+
 def clean_song_title(title: str) -> str:
     if not title:
         return ""
@@ -91,7 +165,8 @@ def clean_song_title(title: str) -> str:
     title = re.sub(r"\s+", " ", title)
     return title.strip()
 
-async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False):
+async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
+    await debug_send(ctx_or_interaction, f"Fetching Song.link data for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled)
     try:
         r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
@@ -99,15 +174,17 @@ async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False):
             timeout=20
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        await debug_send(ctx_or_interaction, f"Song.link API returned keys: {list(data.keys())}", is_slash=is_slash, debug_enabled=debug_enabled)
+        return data
     except:
         return None
 
-def get_genius_link(title: str, artist: str):
+def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
     if not title or not GENIUS_API_KEY:
         return None
-    clean_title_text = clean_song_title(title)
-    query = f"{clean_title_text} {artist}"
+    clean_title = clean_song_title(title)
+    query = f"{clean_title} {artist}"
     try:
         r = requests.get(
             "https://api.genius.com/search",
@@ -117,35 +194,27 @@ def get_genius_link(title: str, artist: str):
         )
         data = r.json()
         hits = data.get("response", {}).get("hits", [])
-        if hits:
-            return hits[0]["result"].get("url")
-        return None
+        return hits[0]["result"].get("url") if hits else None
     except:
         return None
 
-async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
+async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, debug_enabled=True):
     entity_id = None
     for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
         if entity.get("type") == "song":
             entity_id = uid
             break
     if not entity_id:
-        msg = "Could not parse song data."
-        if is_slash:
-            await ctx_or_interaction.followup.send(msg)
-        else:
-            await ctx_or_interaction.send(msg)
         return
-
     song = song_data["entitiesByUniqueId"][entity_id]
     title = song.get("title", "Unknown Title")
     artist = song.get("artistName", "Unknown Artist")
     thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
-    genius_url = get_genius_link(title, artist)
+    genius_url = get_genius_link(title, artist, ctx_or_interaction, is_slash, debug_enabled)
     platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
     platform_links = "\n".join(
         f"[{platform.replace('_',' ').title()}]({data['url']})"
-        for platform, data in platforms if isinstance(data, dict) and "url" in data
+        for platform, data in platforms if "url" in data
     )
     embed = discord.Embed(
         title=title,
@@ -155,160 +224,43 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     )
     if thumbnail:
         embed.set_thumbnail(url=thumbnail)
+
     if is_slash:
         await ctx_or_interaction.followup.send(embed=embed)
     else:
         await ctx_or_interaction.send(embed=embed)
 
-# ---------------------------
-# Prefix Command (!sl)
-# ---------------------------
 @bot.command(name="sl")
-@commands.guild_only()
 async def songlink(ctx, *, query: str):
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
         return
     data = await fetch_song_links(query, ctx, is_slash=False)
     if not data:
-        await ctx.send("Could not find links for that song.")
+        await ctx.send("Could not find links.")
         return
-    await send_songlink_embed(ctx, data, is_slash=False)
+    await send_songlink_embed(ctx, data)
 
-# ---------------------------
-# Slash Command (/sl)
-# ---------------------------
-@tree.command(
-    name="sl",
-    description="Get song links",
-    guild=discord.Object(id=GUILD_ID)
-)
-@app_commands.describe(query="Paste Spotify, Apple, or YouTube link")
+@tree.command(name="sl", description="Get song links", guild=discord.Object(id=GUILD_ID))
 async def slash_songlink(interaction: discord.Interaction, query: str):
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message("Not allowed in this channel.", ephemeral=True)
-        return
+        return await interaction.response.send_message("Not allowed here.", ephemeral=True)
     await interaction.response.defer()
     data = await fetch_song_links(query, interaction, is_slash=True)
     if not data:
-        await interaction.followup.send("Could not find links for that song.")
-        return
+        return await interaction.followup.send("Could not find links.")
     await send_songlink_embed(interaction, data, is_slash=True)
 
-# ---------------------------
-# Fetch Quote
-# ---------------------------
-async def fetch_quote():
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.quotable.io/random") as resp:
-                j = await resp.json()
-                return j.get("content", "No quote available.")
-    except:
-        return "No quote available."
+# ============================
+# Ready Event
+# ============================
 
-# ---------------------------
-# Define Word API
-# ---------------------------
-async def define_word(word: str):
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}") as resp:
-                j = await resp.json()
-                if isinstance(j, list) and j:
-                    meaning = j[0]["meanings"][0]["definitions"][0]["definition"]
-                    return meaning
-    except:
-        pass
-    return "No definition found."
-
-# ---------------------------
-# Wiki Summary API
-# ---------------------------
-async def wiki_summary(query: str):
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{query}") as resp:
-                j = await resp.json()
-                return j.get("extract", "SONGLINK: ❌ No article found.")
-    except:
-        return "SONGLINK: ❌ No article found."
-
-# ---------------------------
-# Define Modal
-# ---------------------------
-class DefineModal(Modal, title="Define a Word"):
-    word = TextInput(label="Word to define", placeholder="Enter a word", required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        definition = await define_word(self.word.value)
-        embed = discord.Embed(title=f"Define: {self.word.value}", description=definition, color=random_hex_color())
-        await interaction.followup.send(embed=embed)
-
-# ---------------------------
-# Wiki Modal
-# ---------------------------
-class WikiModal(Modal, title="Wiki Summary"):
-    query = TextInput(label="Topic", placeholder="Enter topic", required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        summary = await wiki_summary(self.query.value)
-        embed = discord.Embed(title=f"Wiki: {self.query.value}", description=summary, color=random_hex_color())
-        await interaction.followup.send(embed=embed)
-
-# ---------------------------
-# ECM Button View
-# ---------------------------
-class ECMView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Define", style=discord.ButtonStyle.primary, custom_id="define"))
-        self.add_item(discord.ui.Button(label="Wiki", style=discord.ButtonStyle.primary, custom_id="wiki"))
-        self.add_item(discord.ui.Button(label="Weird Law", style=discord.ButtonStyle.danger, custom_id="weird_law"))
-        self.add_item(discord.ui.Button(label="Useless Fact", style=discord.ButtonStyle.secondary, custom_id="useless_fact"))
-        self.add_item(discord.ui.Button(label="Random Quote", style=discord.ButtonStyle.success, custom_id="quote"))
-
-@bot.event
-async def on_interaction(interaction: discord.Interaction):
-    if interaction.type != discord.InteractionType.component:
-        return
-    cid = interaction.data.get("custom_id")
-    await interaction.response.defer()
-    if cid == "quote":
-        text = await fetch_quote()
-        await interaction.followup.send(embed=discord.Embed(title="Quote", description=text, color=random_hex_color()))
-    elif cid == "define":
-        await interaction.response.send_modal(DefineModal())
-    elif cid == "wiki":
-        await interaction.response.send_modal(WikiModal())
-    elif cid == "weird_law":
-        state, law = get_weird_law()
-        await interaction.followup.send(embed=discord.Embed(title=f"Weird Law: {state}", description=law, color=random_hex_color()))
-    elif cid == "useless_fact":
-        await interaction.followup.send(embed=discord.Embed(title="Useless Fact", description="Something trivial.", color=random_hex_color()))
-
-# ---------------------------
-# ECM Slash Command
-# ---------------------------
-@tree.command(
-    name="ecm",
-    description="Open ECM Entertainment menu",
-    guild=discord.Object(id=GUILD_ID)
-)
-async def ecm_command(interaction: discord.Interaction):
-    view = ECMView()
-    await interaction.response.send_message("Welcome to ECM Entertainment! Choose an option below:", view=view)
-
-# ---------------------------
-# Bot Ready
-# ---------------------------
 @bot.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
 
-# ---------------------------
+# ============================
 # Run Bot
-# ---------------------------
+# ============================
+
 bot.run(TOKEN)
