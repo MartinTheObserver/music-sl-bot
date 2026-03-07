@@ -109,8 +109,8 @@ class ZenQuoteView(View):
         )
         return embed
 
-    @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary)
-    async def new_quote(self, interaction: discord.Interaction, button: Button):
+    # Helper method for prefix commands (ctx)
+    async def fetch_new_quote(self):
         try:
             r = requests.get("https://zenquotes.io/api/random", timeout=10)
             r.raise_for_status()
@@ -124,8 +124,12 @@ class ZenQuoteView(View):
         except Exception as e:
             self.quote_text = f"Error fetching quote: {e}"
             self.author = ""
-        await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
+    # Button callback (slash or UI)
+    @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary)
+    async def new_quote(self, interaction: discord.Interaction, button: Button):
+        await self.fetch_new_quote()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
 # ---------------------------
 # Helper: Ephemeral Debug Sender
 # ---------------------------
