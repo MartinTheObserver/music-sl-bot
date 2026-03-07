@@ -370,7 +370,7 @@ class WordView(View):
         self.index = (self.index - 1) % len(self.pages)
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
-@discord.ui.button(label="🎲 Random Word", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🎲 Random Word", style=discord.ButtonStyle.primary)
     async def new_word(self, interaction: discord.Interaction, button: Button):
         await self.generate()
         await interaction.response.edit_message(embed=self.pages[0], view=self)
