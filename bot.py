@@ -463,7 +463,8 @@ async def slash_weird(interaction: discord.Interaction):
 @bot.command(name="quote")
 async def prefix_quote(ctx):
     view = ZenQuoteView()
-    await view.new_quote(ctx)
+    await view.fetch_new_quote()  # Fetch the quote first
+    await ctx.send(embed=view.create_embed(), view=view)
 
 # ---------------------------
 # Slash Command: /quote
@@ -471,7 +472,8 @@ async def prefix_quote(ctx):
 @tree.command(name="quote", description="Random inspirational quote", guild=discord.Object(id=GUILD_ID))
 async def slash_quote(interaction: discord.Interaction):
     view = ZenQuoteView()
-    await view.new_quote(interaction)
+    await view.fetch_new_quote()  # Fetch quote before sending
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
 
 # ---------------------------
 # Bot Events
