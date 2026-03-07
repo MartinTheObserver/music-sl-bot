@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import discord
+from discord.ui import View, Button
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
