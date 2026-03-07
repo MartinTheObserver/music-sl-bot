@@ -113,6 +113,20 @@ async def weird(interaction: discord.Interaction):
         view=view
     )
 
+@bot.command(name="weird")
+async def prefix_weird(ctx):
+    """Prefix command !weird to browse weird laws"""
+    laws_list = list(WEIRD_LAWS.values())
+
+    if not laws_list:
+        await ctx.send("Weird laws database is empty.")
+        return
+
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+
+    await ctx.send(embed=view.create_embed(), view=view)
+
 # Debug functions and utility functions remain unchanged.
 
 @bot.event
