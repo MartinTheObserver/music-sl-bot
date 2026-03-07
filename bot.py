@@ -21,7 +21,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
-DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))
+DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))  # Your Discord ID for ephemeral debug
 
 # ---------------------------
 # Flask Web Server (Render requirement)
@@ -42,7 +42,7 @@ threading.Thread(target=run_flask, daemon=True).start()
 # Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # REQUIRED for prefix commands
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
@@ -50,15 +50,11 @@ tree = bot.tree
 # ---------------------------
 # Load Weird Laws Database
 # ---------------------------
-try:
-    with open("weird_laws.json", "r", encoding="utf-8") as f:
-        WEIRD_LAWS = json.load(f)
-except FileNotFoundError:
-    print("weird_laws.json not found. Weird law commands disabled.")
-    WEIRD_LAWS = {}
+with open("weird_laws.json", "r", encoding="utf-8") as f:
+    WEIRD_LAWS = json.load(f)
 
 # ---------------------------
-# Weird Law Viewer Class
+# Weird Laws Viewer Class
 # ---------------------------
 class WeirdLawView(View):
     def __init__(self, laws, index=0):
@@ -94,30 +90,38 @@ class WeirdLawView(View):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 # ---------------------------
-# Slash Command (/weird)
+# ZenQuotes Viewer Class
 # ---------------------------
-@tree.command(name="weird", description="Browse weird laws from around the world")
-async def weird(interaction: discord.Interaction):
-    laws_list = list(WEIRD_LAWS.values())
-    if not laws_list:
-        await interaction.response.send_message("Weird laws database is empty.", ephemeral=True)
-        return
-    index = random.randint(0, len(laws_list) - 1)
-    view = WeirdLawView(laws_list, index)
-    await interaction.response.send_message(embed=view.create_embed(), view=view)
+class ZenQuoteView(View):
+    def __init__(self, quote_text="", author=""):
+        super().__init__(timeout=120)
+        self.quote_text = quote_text
+        self.author = author
 
-# ---------------------------
-# Prefix Command (!weird)
-# ---------------------------
-@bot.command(name="weird")
-async def prefix_weird(ctx):
-    laws_list = list(WEIRD_LAWS.values())
-    if not laws_list:
-        await ctx.send("Weird laws database is empty.")
-        return
-    index = random.randint(0, len(laws_list) - 1)
-    view = WeirdLawView(laws_list, index)
-    await ctx.send(embed=view.create_embed(), view=view)
+    def create_embed(self):
+        embed = discord.Embed(
+            title="💬 Random Quote",
+            description=f"“{self.quote_text}”\n\n— {self.author}" if self.author else f"“{self.quote_text}”",
+            color=discord.Color.green()
+        )
+        return embed
+
+    @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary)
+    async def new_quote(self, interaction: discord.Interaction, button: Button):
+        try:
+            r = requests.get("https://zenquotes.io/api/random", timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0:
+                self.quote_text = data[0].get("q", "No quote found")
+                self.author = data[0].get("a", "")
+            else:
+                self.quote_text = "No quote found"
+                self.author = ""
+        except Exception as e:
+            self.quote_text = f"Error fetching quote: {e}"
+            self.author = ""
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 # ---------------------------
 # Helper: Ephemeral Debug Sender
@@ -150,7 +154,7 @@ def clean_song_title(title: str) -> str:
     return title.strip()
 
 # ---------------------------
-# Fetch Song.link Data with Debug
+# Fetch Song.link Data
 # ---------------------------
 async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
     await debug_send(ctx_or_interaction, f"Fetching Song.link data for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled)
@@ -164,23 +168,18 @@ async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False, 
         data = r.json()
         await debug_send(ctx_or_interaction, f"Song.link API returned keys: {list(data.keys())}", is_slash=is_slash, debug_enabled=debug_enabled)
         return data
-    except requests.exceptions.RequestException as e:
-        await debug_send(ctx_or_interaction, f"Song.link API request error: {e}", is_slash=is_slash, debug_enabled=debug_enabled)
-        return None
     except Exception as e:
-        await debug_send(ctx_or_interaction, f"Song.link unexpected error: {e}", is_slash=is_slash, debug_enabled=debug_enabled)
+        await debug_send(ctx_or_interaction, f"Song.link error: {e}", is_slash=is_slash, debug_enabled=debug_enabled)
         return None
 
 # ---------------------------
-# Robust Genius Link Fetch with Full Debug
+# Genius API Helper
 # ---------------------------
 def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
     if not title or not GENIUS_API_KEY:
         return None
-
     clean_title = clean_song_title(title)
     query = f"{clean_title} {artist}"
-
     try:
         r = requests.get(
             "https://api.genius.com/search",
@@ -188,55 +187,27 @@ def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=F
             headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
             timeout=20
         )
-
-        if ctx_or_interaction and debug_enabled:
-            if r.status_code == 401:
-                asyncio.create_task(debug_send(ctx_or_interaction, f"Genius API 401 Unauthorized for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled))
-                return None
-            elif r.status_code != 200:
-                asyncio.create_task(debug_send(ctx_or_interaction, f"Genius API returned status {r.status_code}: {r.text}", is_slash=is_slash, debug_enabled=debug_enabled))
-
         data = r.json()
         hits = data.get("response", {}).get("hits", [])
-
-        if not hits and ctx_or_interaction and debug_enabled:
-            asyncio.create_task(debug_send(ctx_or_interaction, f"No Genius hits found for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled))
-            return None
-
         for hit in hits:
             result = hit.get("result", {})
             result_title = result.get("title", "").lower()
             result_artist = result.get("primary_artist", {}).get("name", "").lower()
             if clean_title.lower() in result_title and artist.lower() in result_artist:
-                if ctx_or_interaction and debug_enabled:
-                    asyncio.create_task(debug_send(ctx_or_interaction, f"Found exact Genius match: {result.get('url')}", is_slash=is_slash, debug_enabled=debug_enabled))
                 return result.get("url")
-
-        if hits and ctx_or_interaction and debug_enabled:
-            asyncio.create_task(debug_send(ctx_or_interaction, f"No exact Genius match. Using first hit: {hits[0]['result'].get('url')}", is_slash=is_slash, debug_enabled=debug_enabled))
-
         return hits[0]["result"].get("url") if hits else None
-
-    except requests.exceptions.RequestException as e:
-        if ctx_or_interaction and debug_enabled:
-            asyncio.create_task(debug_send(ctx_or_interaction, f"Genius API request exception: {e}", is_slash=is_slash, debug_enabled=debug_enabled))
-        return None
-    except Exception as e:
-        if ctx_or_interaction and debug_enabled:
-            asyncio.create_task(debug_send(ctx_or_interaction, f"Genius unexpected exception: {e}", is_slash=is_slash, debug_enabled=debug_enabled))
+    except Exception:
         return None
 
 # ---------------------------
-# Send Embed with Debug
+# Send Song.link Embed
 # ---------------------------
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, debug_enabled=True):
-    await debug_send(ctx_or_interaction, f"Parsing Song.link entities...", is_slash=is_slash, debug_enabled=debug_enabled)
     entity_id = None
     for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
         if entity.get("type") == "song":
             entity_id = uid
             break
-
     if not entity_id:
         msg = "Could not parse song data."
         if is_slash:
@@ -244,24 +215,17 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
         else:
             await ctx_or_interaction.send(msg)
         return
-
     song = song_data["entitiesByUniqueId"][entity_id]
     title = song.get("title", "Unknown Title")
     artist = song.get("artistName", "Unknown Artist")
     thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
-
     genius_url = get_genius_link(title, artist, ctx_or_interaction, is_slash, debug_enabled)
-    await debug_send(ctx_or_interaction, f"Genius URL used: {genius_url}", is_slash=is_slash, debug_enabled=debug_enabled)
-
     platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
-    await debug_send(ctx_or_interaction, f"Found {len(platforms)} platform links.", is_slash=is_slash, debug_enabled=debug_enabled)
-
     platform_links = "\n".join(
         f"[{platform.replace('_',' ').title()}]({data['url']})"
         for platform, data in platforms
         if isinstance(data, dict) and "url" in data
     )
-
     chunks = []
     current_chunk = ""
     for line in platform_links.split("\n"):
@@ -272,9 +236,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
             current_chunk += ("\n" if current_chunk else "") + line
     if current_chunk:
         chunks.append(current_chunk)
-
-    await debug_send(ctx_or_interaction, f"Split links into {len(chunks)} embed page(s).", is_slash=is_slash, debug_enabled=debug_enabled)
-
     for i, chunk in enumerate(chunks):
         embed = discord.Embed(
             title=title,
@@ -282,26 +243,18 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
             description=f"by {artist}",
             color=0x1DB954
         )
-
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
-
-        embed.add_field(
-            name="Listen On",
-            value=chunk,
-            inline=False
-        )
-
+        embed.add_field(name="Listen On", value=chunk, inline=False)
         if len(chunks) > 1:
             embed.set_footer(text=f"Page {i+1}/{len(chunks)}")
-
         if is_slash:
             await ctx_or_interaction.followup.send(embed=embed)
         else:
             await ctx_or_interaction.send(embed=embed)
 
 # ---------------------------
-# Prefix Command (!sl)
+# Prefix Command: !sl
 # ---------------------------
 @bot.command(name="sl")
 @commands.guild_only()
@@ -311,48 +264,86 @@ async def songlink(ctx, *, query: str):
     if query.lower().startswith("debug "):
         debug_enabled = True
         query = query[6:].strip()
-
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
         return
-
     song_data = await fetch_song_links(query, ctx, is_slash=False, debug_enabled=debug_enabled)
     if not song_data:
         await ctx.send("Could not find links for that song.")
         return
-
     await send_songlink_embed(ctx, song_data, is_slash=False, debug_enabled=debug_enabled)
 
-@songlink.error
-async def songlink_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("You don't have permission to use this command.")
-    elif isinstance(error, commands.NoPrivateMessage):
-        await ctx.send("This command cannot be used in DMs.")
-
 # ---------------------------
-# Slash Command (/sl)
+# Slash Command: /sl
 # ---------------------------
-@tree.command(
-    name="sl",
-    description="Get song links",
-    guild=discord.Object(id=GUILD_ID)
-)
+@tree.command(name="sl", description="Get song links", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(query="Paste Spotify, Apple, or YouTube link", debug="Show debug messages for yourself")
 async def slash_songlink(interaction: discord.Interaction, query: str, debug: bool = False):
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message(
-            "Not allowed in this channel.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("Not allowed in this channel.", ephemeral=True)
         return
-
     await interaction.response.defer()
     song_data = await fetch_song_links(query, interaction, is_slash=True, debug_enabled=debug)
     if not song_data:
         await interaction.followup.send("Could not find links for that song.")
         return
-
     await send_songlink_embed(interaction, song_data, is_slash=True, debug_enabled=debug)
+
+# ---------------------------
+# Prefix Command: !weird
+# ---------------------------
+@bot.command(name="weird")
+async def prefix_weird(ctx):
+    laws_list = list(WEIRD_LAWS.values())
+    if not laws_list:
+        await ctx.send("Weird laws database is empty.")
+        return
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+    await ctx.send(embed=view.create_embed(), view=view)
+
+# ---------------------------
+# Slash Command: /weird
+# ---------------------------
+@tree.command(name="weird", description="Browse weird laws from around the world")
+async def slash_weird(interaction: discord.Interaction):
+    laws_list = list(WEIRD_LAWS.values())
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
+
+# ---------------------------
+# Prefix Command: !quote
+# ---------------------------
+@bot.command(name="quote")
+async def prefix_quote(ctx):
+    try:
+        r = requests.get("https://zenquotes.io/api/random", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        quote_text = data[0].get("q", "No quote found")
+        author = data[0].get("a", "")
+    except Exception as e:
+        quote_text = f"Error fetching quote: {e}"
+        author = ""
+    view = ZenQuoteView(quote_text, author)
+    await ctx.send(embed=view.create_embed(), view=view)
+
+# ---------------------------
+# Slash Command: /quote
+# ---------------------------
+@tree.command(name="quote", description="Get a random quote")
+async def slash_quote(interaction: discord.Interaction):
+    try:
+        r = requests.get("https://zenquotes.io/api/random", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        quote_text = data[0].get("q", "No quote found")
+        author = data[0].get("a", "")
+    except Exception as e:
+        quote_text = f"Error fetching quote: {e}"
+        author = ""
+    view = ZenQuoteView(quote_text, author)
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
 
 # ---------------------------
 # Genius API Test on Startup
