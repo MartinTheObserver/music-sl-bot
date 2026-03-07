@@ -366,15 +366,15 @@ class WordView(View):
         self.index = (self.index - 1) % len(self.pages)
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
+@discord.ui.button(label="🎲 Random Word", style=discord.ButtonStyle.primary)
+    async def new_word(self, interaction: discord.Interaction, button: Button):
+        await self.generate()
+        await interaction.response.edit_message(embed=self.pages[0], view=self)
+    
     @discord.ui.button(label="➡ Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: Button):
         self.index = (self.index + 1) % len(self.pages)
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
-
-    @discord.ui.button(label="🎲 New Word", style=discord.ButtonStyle.primary)
-    async def new_word(self, interaction: discord.Interaction, button: Button):
-        await self.generate()
-        await interaction.response.edit_message(embed=self.pages[0], view=self)
 
 # ---------------------------
 # Prefix Command: !word
