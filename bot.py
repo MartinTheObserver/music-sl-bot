@@ -19,9 +19,10 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
+API_NINJAS_KEY = os.getenv("API_NINJAS_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
-DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))  # Your Discord ID for ephemeral debug
+DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))
 
 # ---------------------------
 # Flask Web Server (Render requirement)
@@ -42,7 +43,7 @@ threading.Thread(target=run_flask, daemon=True).start()
 # Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
-intents.message_content = True  # REQUIRED for prefix commands
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
@@ -109,7 +110,7 @@ class ZenQuoteView(View):
     @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary)
     async def new_quote(self, interaction: discord.Interaction, button: Button):
         try:
-            r = requests.get("https://zenquotes.io/api/random", timeout=20)
+            r = requests.get("https://zenquotes.io/api/random", timeout=10)
             r.raise_for_status()
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
@@ -254,99 +255,57 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
             await ctx_or_interaction.send(embed=embed)
 
 # ---------------------------
-# Prefix Command: !sl
+# Random Word Helper (API Ninjas)
 # ---------------------------
-@bot.command(name="sl")
-@commands.guild_only()
-@commands.has_permissions(send_messages=True)
-async def songlink(ctx, *, query: str):
-    debug_enabled = False
-    if query.lower().startswith("debug "):
-        debug_enabled = True
-        query = query[6:].strip()
-    if ctx.channel.id != ALLOWED_CHANNEL_ID:
-        return
-    song_data = await fetch_song_links(query, ctx, is_slash=False, debug_enabled=debug_enabled)
-    if not song_data:
-        await ctx.send("Could not find links for that song.")
-        return
-    await send_songlink_embed(ctx, song_data, is_slash=False, debug_enabled=debug_enabled)
-
-# ---------------------------
-# Slash Command: /sl
-# ---------------------------
-@tree.command(name="sl", description="Get song links", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(query="Paste Spotify, Apple, or YouTube link", debug="Show debug messages for yourself")
-async def slash_songlink(interaction: discord.Interaction, query: str, debug: bool = False):
-    if interaction.channel_id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message("Not allowed in this channel.", ephemeral=True)
-        return
-    await interaction.response.defer()
-    song_data = await fetch_song_links(query, interaction, is_slash=True, debug_enabled=debug)
-    if not song_data:
-        await interaction.followup.send("Could not find links for that song.")
-        return
-    await send_songlink_embed(interaction, song_data, is_slash=True, debug_enabled=debug)
-
-# ---------------------------
-# Prefix Command: !weird
-# ---------------------------
-@bot.command(name="weird")
-async def prefix_weird(ctx):
-    laws_list = list(WEIRD_LAWS.values())
-    if not laws_list:
-        await ctx.send("Weird laws database is empty.")
-        return
-    index = random.randint(0, len(laws_list) - 1)
-    view = WeirdLawView(laws_list, index)
-    await ctx.send(embed=view.create_embed(), view=view)
-
-# ---------------------------
-# Slash Command: /weird
-# ---------------------------
-@tree.command(name="weird", description="Browse weird laws from around the world")
-async def slash_weird(interaction: discord.Interaction):
-    laws_list = list(WEIRD_LAWS.values())
-    index = random.randint(0, len(laws_list) - 1)
-    view = WeirdLawView(laws_list, index)
-    await interaction.response.send_message(embed=view.create_embed(), view=view)
-
-# ---------------------------
-# Prefix Command: !quote
-# ---------------------------
-@bot.command(name="quote")
-async def prefix_quote(ctx):
+async def random_word():
+    """Fetch a truly random word from API Ninjas."""
     try:
-        r = requests.get("https://zenquotes.io/api/random", timeout=20)
+        r = requests.get(
+            "https://api.api-ninjas.com/v1/randomword",
+            headers={"X-Api-Key": API_NINJAS_KEY},
+            timeout=10
+        )
         r.raise_for_status()
         data = r.json()
-        quote_text = data[0].get("q", "No quote found")
-        author = data[0].get("a", "")
+        return data.get("word", "word")
     except Exception as e:
-        quote_text = f"Error fetching quote: {e}"
-        author = ""
-    view = ZenQuoteView(quote_text, author)
-    await ctx.send(embed=view.create_embed(), view=view)
+        print(f"[Random Word Error] {e}")
+        return "word"
 
 # ---------------------------
-# Slash Command: /quote
+# Dictionary, Related, Etymology Helpers
 # ---------------------------
-@tree.command(name="quote", description="Get a random quote")
-async def slash_quote(interaction: discord.Interaction):
+async def dictionary(word):
+    r = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=10)
+    if r.status_code != 200:
+        return "N/A", [], []
+    data = r.json()[0]
+    pronunciation = data.get("phonetics", [{"text": "N/A"}])[0].get("text", "N/A")
+    definitions, examples = [], []
+    for meaning in data.get("meanings", []):
+        for d in meaning.get("definitions", []):
+            definitions.append(d.get("definition"))
+            if d.get("example"):
+                examples.append(d.get("example"))
+    return pronunciation, definitions[:10], examples[:6]
+
+async def related(word):
+    r = requests.get(f"https://api.datamuse.com/words?ml={word}&max=20", timeout=10)
+    return [x["word"] for x in r.json()]
+
+async def etymology(word):
     try:
-        r = requests.get("https://zenquotes.io/api/random", timeout=20)
-        r.raise_for_status()
-        data = r.json()
-        quote_text = data[0].get("q", "No quote found")
-        author = data[0].get("a", "")
-    except Exception as e:
-        quote_text = f"Error fetching quote: {e}"
-        author = ""
-    view = ZenQuoteView(quote_text, author)
-    await interaction.response.send_message(embed=view.create_embed(), view=view)
+        r = requests.get(f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json", timeout=10)
+        html = r.json()["parse"]["text"]["*"]
+        m = re.search(r"Etymology.*?<p>(.*?)</p>", html, re.S)
+        if m:
+            return re.sub("<.*?>", "", m.group(1))
+    except:
+        pass
+    return "Etymology not found."
 
 # ---------------------------
-# WORD VIEW (Corrected)
+# Word Viewer Class
 # ---------------------------
 class WordView(View):
     def __init__(self):
@@ -355,19 +314,10 @@ class WordView(View):
         self.index = 0
 
     async def generate(self):
-        try:
-            r = requests.get("https://random-word-api.herokuapp.com/word", timeout=20)
-            r.raise_for_status()
-            word = r.json()[0]
-        except Exception as e:
-            word = "Error"
-            self.pages = [discord.Embed(title="Error", description=f"Could not fetch word: {e}")]
-            return
-
+        word = await random_word()
         pron, defs, examples = await dictionary(word)
         rel = await related(word)
         ety = await etymology(word)
-
         self.pages = []
 
         def chunk(lst, n):
@@ -405,16 +355,11 @@ class WordView(View):
 
     @discord.ui.button(label="🎲 New Word", style=discord.ButtonStyle.primary)
     async def new_word(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer()
         await self.generate()
-        await interaction.followup.edit_message(
-            message_id=interaction.message.id,
-            embed=self.pages[0],
-            view=self
-        )
+        await interaction.response.edit_message(embed=self.pages[0], view=self)
 
 # ---------------------------
-# Prefix Command: !word
+# PREFIX COMMANDS
 # ---------------------------
 @bot.command(name="word")
 async def prefix_word(ctx):
@@ -422,14 +367,88 @@ async def prefix_word(ctx):
     await view.generate()
     await ctx.send(embed=view.pages[0], view=view)
 
+@bot.command(name="weird")
+async def prefix_weird(ctx):
+    laws_list = list(WEIRD_LAWS.values())
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+    await ctx.send(embed=view.create_embed(), view=view)
+
+@bot.command(name="quote")
+async def prefix_quote(ctx):
+    try:
+        r = requests.get("https://zenquotes.io/api/random", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        quote_text = data[0].get("q", "No quote found")
+        author = data[0].get("a", "")
+    except Exception as e:
+        quote_text = f"Error fetching quote: {e}"
+        author = ""
+    view = ZenQuoteView(quote_text, author)
+    await ctx.send(embed=view.create_embed(), view=view)
+
 # ---------------------------
-# Slash Command: /word
+# SLASH COMMANDS
 # ---------------------------
 @tree.command(name="word", description="Discover a random word")
 async def slash_word(interaction: discord.Interaction):
     view = WordView()
     await view.generate()
     await interaction.response.send_message(embed=view.pages[0], view=view)
+
+@tree.command(name="weird", description="Browse weird laws from around the world")
+async def slash_weird(interaction: discord.Interaction):
+    laws_list = list(WEIRD_LAWS.values())
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
+
+@tree.command(name="quote", description="Get a random quote")
+async def slash_quote(interaction: discord.Interaction):
+    try:
+        r = requests.get("https://zenquotes.io/api/random", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        quote_text = data[0].get("q", "No quote found")
+        author = data[0].get("a", "")
+    except Exception as e:
+        quote_text = f"Error fetching quote: {e}"
+        author = ""
+    view = ZenQuoteView(quote_text, author)
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
+
+# ---------------------------
+# SL PREFIX COMMANDS
+# ---------------------------
+@bot.command(name="sl")
+@commands.guild_only()
+@commands.has_permissions(send_messages=True)
+async def songlink(ctx, *, query: str):
+    debug_enabled = False
+    if query.lower().startswith("debug "):
+        debug_enabled = True
+        query = query[6:].strip()
+    if ctx.channel.id != ALLOWED_CHANNEL_ID:
+        return
+    song_data = await fetch_song_links(query, ctx, is_slash=False, debug_enabled=debug_enabled)
+    if not song_data:
+        await ctx.send("Could not find links for that song.")
+        return
+    await send_songlink_embed(ctx, song_data, is_slash=False, debug_enabled=debug_enabled)
+
+@tree.command(name="sl", description="Get song links", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(query="Paste Spotify, Apple, or YouTube link", debug="Show debug messages for yourself")
+async def slash_songlink(interaction: discord.Interaction, query: str, debug: bool = False):
+    if interaction.channel_id != ALLOWED_CHANNEL_ID:
+        await interaction.response.send_message("Not allowed in this channel.", ephemeral=True)
+        return
+    await interaction.response.defer()
+    song_data = await fetch_song_links(query, interaction, is_slash=True, debug_enabled=debug)
+    if not song_data:
+        await interaction.followup.send("Could not find links for that song.")
+        return
+    await send_songlink_embed(interaction, song_data, is_slash=True, debug_enabled=debug)
 
 # ---------------------------
 # Genius API Test on Startup
