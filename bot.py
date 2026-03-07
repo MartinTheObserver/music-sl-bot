@@ -399,11 +399,11 @@ async def validate_genius_key():
 # ---------------------------
 @bot.event
 async def on_ready():
-    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    # Sync slash commands and remove stale ones
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
     # Run Genius API validation asynchronously
     asyncio.create_task(validate_genius_key())
-
 # ---------------------------
 # Run Bot
 # ---------------------------
