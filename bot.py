@@ -10,6 +10,7 @@ import threading
 import asyncio
 import json
 import random
+from discord.ui import View, Button
 
 # ---------------------------
 # Load Environment Variables
@@ -20,7 +21,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
-DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))  # Your Discord ID for ephemeral debug
+DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))
 
 # ---------------------------
 # Flask Web Server (Render requirement)
@@ -41,16 +42,87 @@ threading.Thread(target=run_flask, daemon=True).start()
 # Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
-intents.message_content = True  # REQUIRED for prefix commands
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # ---------------------------
+# Load Weird Laws Database
+# ---------------------------
+try:
+    with open("weird_laws.json", "r", encoding="utf-8") as f:
+        WEIRD_LAWS = json.load(f)
+except FileNotFoundError:
+    print("weird_laws.json not found. Weird law commands disabled.")
+    WEIRD_LAWS = {}
+
+# ---------------------------
+# Weird Law Viewer Class
+# ---------------------------
+class WeirdLawView(View):
+    def __init__(self, laws, index=0):
+        super().__init__(timeout=120)
+        self.laws = laws
+        self.index = index
+
+    def create_embed(self):
+        law = self.laws[self.index]
+        embed = discord.Embed(
+            title="🌍 Weird Law",
+            description=f"**{law['law']}**",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Location", value=f"{law['region']}, {law['country']}", inline=False)
+        embed.add_field(name="Explanation", value=law["description"], inline=False)
+        embed.set_footer(text=f"Source: {law['source']} | #{self.index+1}/{len(self.laws)}")
+        return embed
+
+    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, button: Button):
+        self.index = (self.index - 1) % len(self.laws)
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="🎲 Random", style=discord.ButtonStyle.primary)
+    async def random_law(self, interaction: discord.Interaction, button: Button):
+        self.index = random.randint(0, len(self.laws) - 1)
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, button: Button):
+        self.index = (self.index + 1) % len(self.laws)
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+# ---------------------------
+# Slash Command (/weird)
+# ---------------------------
+@tree.command(name="weird", description="Browse weird laws from around the world")
+async def weird(interaction: discord.Interaction):
+    laws_list = list(WEIRD_LAWS.values())
+    if not laws_list:
+        await interaction.response.send_message("Weird laws database is empty.", ephemeral=True)
+        return
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
+
+# ---------------------------
+# Prefix Command (!weird)
+# ---------------------------
+@bot.command(name="weird")
+async def prefix_weird(ctx):
+    laws_list = list(WEIRD_LAWS.values())
+    if not laws_list:
+        await ctx.send("Weird laws database is empty.")
+        return
+    index = random.randint(0, len(laws_list) - 1)
+    view = WeirdLawView(laws_list, index)
+    await ctx.send(embed=view.create_embed(), view=view)
+
+# ---------------------------
 # Helper: Ephemeral Debug Sender
 # ---------------------------
 async def debug_send(ctx_or_interaction, msg, is_slash=False, ephemeral=True, debug_enabled=True):
-    """Send ephemeral debug messages only if debug_enabled and DEBUG_USER_ID matches"""
     if not debug_enabled:
         return
     try:
@@ -321,7 +393,6 @@ async def validate_genius_key():
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
-    # Run Genius API validation asynchronously
     asyncio.create_task(validate_genius_key())
 
 # ---------------------------
