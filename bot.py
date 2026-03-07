@@ -50,6 +50,67 @@ tree = bot.tree
 with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
+class WeirdLawView(View):
+    def __init__(self, laws, index=0):
+        super().__init__(timeout=120)
+        self.laws = laws
+        self.index = index
+
+    def create_embed(self):
+        law = self.laws[self.index]
+
+        embed = discord.Embed(
+            title="🌍 Weird Law",
+            description=f"**{law['law']}**",
+            color=discord.Color.orange()
+        )
+
+        embed.add_field(
+            name="Location",
+            value=f"{law['region']}, {law['country']}",
+            inline=False
+        )
+
+        embed.add_field(
+            name="Explanation",
+            value=law["description"],
+            inline=False
+        )
+
+        embed.set_footer(text=f"Source: {law['source']} | #{self.index+1}/{len(self.laws)}")
+
+        return embed
+
+    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, button: Button):
+
+        self.index = (self.index - 1) % len(self.laws)
+
+        await interaction.response.edit_message(
+            embed=self.create_embed(),
+            view=self
+        )
+
+    @discord.ui.button(label="🎲 Random", style=discord.ButtonStyle.primary)
+    async def random_law(self, interaction: discord.Interaction, button: Button):
+
+        self.index = random.randint(0, len(self.laws) - 1)
+
+        await interaction.response.edit_message(
+            embed=self.create_embed(),
+            view=self
+        )
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, button: Button):
+
+        self.index = (self.index + 1) % len(self.laws)
+
+        await interaction.response.edit_message(
+            embed=self.create_embed(),
+            view=self
+        )
+
 # ---------------------------
 # Helper: Ephemeral Debug Sender
 # ---------------------------
