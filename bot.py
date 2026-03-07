@@ -45,6 +45,10 @@ intents.message_content = True  # REQUIRED for prefix commands
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
+# Load weird laws database
+with open("weird_laws.json", "r", encoding="utf-8") as f:
+    WEIRD_LAWS = json.load(f)
+
 # ---------------------------
 # Helper: Ephemeral Debug Sender
 # ---------------------------
