@@ -111,6 +111,20 @@ class WeirdLawView(View):
             view=self
         )
 
+@bot.tree.command(name="weird", description="Browse weird laws from around the world")
+async def weird(interaction: discord.Interaction):
+
+    laws_list = list(WEIRD_LAWS.values())
+
+    index = random.randint(0, len(laws_list) - 1)
+
+    view = WeirdLawView(laws_list, index)
+
+    await interaction.response.send_message(
+        embed=view.create_embed(),
+        view=view
+    )
+
 # ---------------------------
 # Helper: Ephemeral Debug Sender
 # ---------------------------
