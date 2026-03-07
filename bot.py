@@ -1,3 +1,4 @@
+python
 import os
 import re
 import requests
@@ -12,20 +13,15 @@ import asyncio
 import json
 import random
 
-# ---------------------------
 # Load Environment Variables
-# ---------------------------
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
-DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))  # Your Discord ID for ephemeral debug
+DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID")) 
 
-# ---------------------------
-# Flask Web Server (Render requirement)
-# ---------------------------
 app = Flask(__name__)
 
 @app.route("/")
@@ -38,16 +34,10 @@ def run_flask():
 
 threading.Thread(target=run_flask, daemon=True).start()
 
-# ---------------------------
-# Discord Bot Setup
-# ---------------------------
 intents = discord.Intents.default()
-intents.message_content = True  # REQUIRED for prefix commands
-
+intents.message_content = True 
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
 
-# Load weird laws database
 with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
@@ -58,27 +48,27 @@ class WeirdLawView(View):
         self.index = index
 
     def create_embed(self):
-        law = self.laws[self.index]
+        law = self.laws
 
         embed = discord.Embed(
             title="🌍 Weird Law",
-            description=f"**{law['law']}**",
+            description=f"**{law}**",
             color=discord.Color.orange()
         )
 
         embed.add_field(
             name="Location",
-            value=f"{law['region']}, {law['country']}",
+            value=f"{law}, {law}",
             inline=False
         )
 
         embed.add_field(
             name="Explanation",
-            value=law["description"],
+            value=law,
             inline=False
         )
 
-        embed.set_footer(text=f"Source: {law['source']} | #{self.index+1}/{len(self.laws)}")
+        embed.set_footer(text=f"Source: {law} | #{self.index+1}/{len(self.laws)}")
 
         return embed
 
@@ -126,11 +116,7 @@ async def weird(interaction: discord.Interaction):
         view=view
     )
 
-# ---------------------------
-# Helper: Ephemeral Debug Sender
-# ---------------------------
 async def debug_send(ctx_or_interaction, msg, is_slash=False, ephemeral=True, debug_enabled=True):
-    """Send ephemeral debug messages only if debug_enabled and DEBUG_USER_ID matches"""
     if not debug_enabled:
         return
     try:
@@ -142,24 +128,18 @@ async def debug_send(ctx_or_interaction, msg, is_slash=False, ephemeral=True, de
         else:
             await ctx_or_interaction.send(f"```DEBUG: {msg}```")
     except Exception as e:
-        print(f"[DEBUG ERROR] Could not send debug message: {e}")
+        print(f" Could not send debug message: {e}")
 
-# ---------------------------
-# Helper: Clean Song Title for Genius Search
-# ---------------------------
 def clean_song_title(title: str) -> str:
     if not title:
         return ""
-    title = re.sub(r"\(feat\.?.*?\)|\[feat\.?.*?\]", "", title, flags=re.IGNORECASE)
-    title = re.sub(r"\(.*?Remix.*?\)|\[.*?Remix.*?\]", "", title, flags=re.IGNORECASE)
-    title = re.sub(r"[\[\]\(\)]", "", title)
-    title = re.sub(r"[^\w\s&'-]", "", title)
+    title = re.sub(r"\(feat\.?.*?\)|\", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\(.*?Remix.*?\)|\", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\(\)]", "", title)
+    title = re.sub(r"", "", title)
     title = re.sub(r"\s+", " ", title)
     return title.strip()
 
-# ---------------------------
-# Fetch Song.link Data with Debug
-# ---------------------------
 async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
     await debug_send(ctx_or_interaction, f"Fetching Song.link data for query: {query}", is_slash=is_slash, debug_enabled=debug_enabled)
     try:
@@ -179,9 +159,6 @@ async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False, 
         await debug_send(ctx_or_interaction, f"Song.link unexpected error: {e}", is_slash=is_slash, debug_enabled=debug_enabled)
         return None
 
-# ---------------------------
-# Robust Genius Link Fetch with Full Debug
-# ---------------------------
 def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=False, debug_enabled=True):
     if not title or not GENIUS_API_KEY:
         return None
@@ -221,9 +198,9 @@ def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=F
                 return result.get("url")
 
         if hits and ctx_or_interaction and debug_enabled:
-            asyncio.create_task(debug_send(ctx_or_interaction, f"No exact Genius match. Using first hit: {hits[0]['result'].get('url')}", is_slash=is_slash, debug_enabled=debug_enabled))
+            asyncio.create_task(debug_send(ctx_or_interaction, f"No exact Genius match. Using first hit: {hits.get('url')}", is_slash=is_slash, debug_enabled=debug_enabled))
 
-        return hits[0]["result"].get("url") if hits else None
+        return hits.get("url") if hits else None
 
     except requests.exceptions.RequestException as e:
         if ctx_or_interaction and debug_enabled:
@@ -234,9 +211,6 @@ def get_genius_link(title: str, artist: str, ctx_or_interaction=None, is_slash=F
             asyncio.create_task(debug_send(ctx_or_interaction, f"Genius unexpected exception: {e}", is_slash=is_slash, debug_enabled=debug_enabled))
         return None
 
-# ---------------------------
-# Send Embed with Debug
-# ---------------------------
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, debug_enabled=True):
     await debug_send(ctx_or_interaction, f"Parsing Song.link entities...", is_slash=is_slash, debug_enabled=debug_enabled)
     entity_id = None
@@ -253,7 +227,7 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
             await ctx_or_interaction.send(msg)
         return
 
-    song = song_data["entitiesByUniqueId"][entity_id]
+    song = song_data
     title = song.get("title", "Unknown Title")
     artist = song.get("artistName", "Unknown Artist")
     thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
@@ -261,11 +235,11 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
     genius_url = get_genius_link(title, artist, ctx_or_interaction, is_slash, debug_enabled)
     await debug_send(ctx_or_interaction, f"Genius URL used: {genius_url}", is_slash=is_slash, debug_enabled=debug_enabled)
 
-    platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
+    platforms = list(song_data.get("linksByPlatform", {}).items())
     await debug_send(ctx_or_interaction, f"Found {len(platforms)} platform links.", is_slash=is_slash, debug_enabled=debug_enabled)
 
     platform_links = "\n".join(
-        f"[{platform.replace('_',' ').title()}]({data['url']})"
+        f"({data})"
         for platform, data in platforms
         if isinstance(data, dict) and "url" in data
     )
@@ -308,9 +282,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False, deb
         else:
             await ctx_or_interaction.send(embed=embed)
 
-# ---------------------------
-# Prefix Command (!sl)
-# ---------------------------
 @bot.command(name="sl")
 @commands.guild_only()
 @commands.has_permissions(send_messages=True)
@@ -318,7 +289,7 @@ async def songlink(ctx, *, query: str):
     debug_enabled = False
     if query.lower().startswith("debug "):
         debug_enabled = True
-        query = query[6:].strip()
+        query = query.strip()
 
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
         return
@@ -337,9 +308,6 @@ async def songlink_error(ctx, error):
     elif isinstance(error, commands.NoPrivateMessage):
         await ctx.send("This command cannot be used in DMs.")
 
-# ---------------------------
-# Slash Command (/sl)
-# ---------------------------
 @tree.command(
     name="sl",
     description="Get song links",
@@ -362,12 +330,9 @@ async def slash_songlink(interaction: discord.Interaction, query: str, debug: bo
 
     await send_songlink_embed(interaction, song_data, is_slash=True, debug_enabled=debug)
 
-# ---------------------------
-# Genius API Test on Startup
-# ---------------------------
 async def validate_genius_key():
     if not GENIUS_API_KEY:
-        print("[Startup Warning] Genius API key not set.")
+        print(" Genius API key not set.")
         return
     try:
         r = requests.get(
@@ -394,17 +359,10 @@ async def validate_genius_key():
         user = await bot.fetch_user(DEBUG_USER_ID)
         await debug_send(user, f"Exception during Genius API validation: {e}", debug_enabled=True)
 
-# ---------------------------
-# Bot Ready Event
-# ---------------------------
 @bot.event
 async def on_ready():
-    # Sync slash commands and remove stale ones
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
-    # Run Genius API validation asynchronously
     asyncio.create_task(validate_genius_key())
-# ---------------------------
-# Run Bot
-# ---------------------------
+
 bot.run(TOKEN)
