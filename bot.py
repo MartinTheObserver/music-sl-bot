@@ -109,7 +109,7 @@ class ZenQuoteView(View):
     @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary)
     async def new_quote(self, interaction: discord.Interaction, button: Button):
         try:
-            r = requests.get("https://zenquotes.io/api/random", timeout=10)
+            r = requests.get("https://zenquotes.io/api/random", timeout=20)
             r.raise_for_status()
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
@@ -317,7 +317,7 @@ async def slash_weird(interaction: discord.Interaction):
 @bot.command(name="quote")
 async def prefix_quote(ctx):
     try:
-        r = requests.get("https://zenquotes.io/api/random", timeout=10)
+        r = requests.get("https://zenquotes.io/api/random", timeout=20)
         r.raise_for_status()
         data = r.json()
         quote_text = data[0].get("q", "No quote found")
@@ -334,7 +334,7 @@ async def prefix_quote(ctx):
 @tree.command(name="quote", description="Get a random quote")
 async def slash_quote(interaction: discord.Interaction):
     try:
-        r = requests.get("https://zenquotes.io/api/random", timeout=10)
+        r = requests.get("https://zenquotes.io/api/random", timeout=20)
         r.raise_for_status()
         data = r.json()
         quote_text = data[0].get("q", "No quote found")
@@ -346,57 +346,8 @@ async def slash_quote(interaction: discord.Interaction):
     await interaction.response.send_message(embed=view.create_embed(), view=view)
 
 # ---------------------------
+# WORD VIEW (Corrected)
 # ---------------------------
-# WORD EXPLORER HELPERS & VIEW
-# ---------------------------
-async def random_word():
-    try:
-        r = requests.get("https://random-word-api.herokuapp.com/word", timeout=15)
-        r.raise_for_status()
-        return r.json()[0]
-    except Exception:
-        return "example"  # fallback word if API fails
-
-async def dictionary(word):
-    try:
-        r = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=15)
-        if r.status_code != 200:
-            return "N/A", [], []
-        data = r.json()[0]
-        pronunciation = "N/A"
-        if data.get("phonetics"):
-            pronunciation = data["phonetics"][0].get("text", "N/A")
-        definitions = []
-        examples = []
-        for meaning in data.get("meanings", []):
-            for d in meaning.get("definitions", []):
-                definitions.append(d.get("definition"))
-                if d.get("example"):
-                    examples.append(d.get("example"))
-        return pronunciation, definitions[:10], examples[:6]
-    except Exception:
-        return "N/A", [], []
-
-async def related(word):
-    try:
-        r = requests.get(f"https://api.datamuse.com/words?ml={word}&max=20", timeout=15)
-        r.raise_for_status()
-        return [x["word"] for x in r.json()]
-    except Exception:
-        return []
-
-async def etymology(word):
-    try:
-        r = requests.get(f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json", timeout=15)
-        html = r.json()["parse"]["text"]["*"]
-        m = re.search(r"Etymology.*?<p>(.*?)</p>", html, re.S)
-        if m:
-            text = re.sub("<.*?>", "", m.group(1))
-            return text
-    except Exception:
-        pass
-    return "Etymology not found."
-
 class WordView(View):
     def __init__(self):
         super().__init__(timeout=120)
@@ -404,10 +355,19 @@ class WordView(View):
         self.index = 0
 
     async def generate(self):
-        word = await random_word()
+        try:
+            r = requests.get("https://random-word-api.herokuapp.com/word", timeout=20)
+            r.raise_for_status()
+            word = r.json()[0]
+        except Exception as e:
+            word = "Error"
+            self.pages = [discord.Embed(title="Error", description=f"Could not fetch word: {e}")]
+            return
+
         pron, defs, examples = await dictionary(word)
         rel = await related(word)
         ety = await etymology(word)
+
         self.pages = []
 
         def chunk(lst, n):
@@ -435,37 +395,41 @@ class WordView(View):
 
     @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
     async def prev(self, interaction: discord.Interaction, button: Button):
-        if not self.pages:
-            return
         self.index = (self.index - 1) % len(self.pages)
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="➡ Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: Button):
-        if not self.pages:
-            return
         self.index = (self.index + 1) % len(self.pages)
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="🎲 New Word", style=discord.ButtonStyle.primary)
     async def new_word(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
         await self.generate()
-        if self.pages:
-            await interaction.response.edit_message(embed=self.pages[0], view=self)
+        await interaction.followup.edit_message(
+            message_id=interaction.message.id,
+            embed=self.pages[0],
+            view=self
+        )
 
+# ---------------------------
+# Prefix Command: !word
+# ---------------------------
 @bot.command(name="word")
 async def prefix_word(ctx):
     view = WordView()
     await view.generate()
-    if view.pages:
-        await ctx.send(embed=view.pages[0], view=view)
+    await ctx.send(embed=view.pages[0], view=view)
 
+# ---------------------------
+# Slash Command: /word
+# ---------------------------
 @tree.command(name="word", description="Discover a random word")
 async def slash_word(interaction: discord.Interaction):
     view = WordView()
     await view.generate()
-    if view.pages:
-        await interaction.response.send_message(embed=view.pages[0], view=view)
+    await interaction.response.send_message(embed=view.pages[0], view=view)
 
 # ---------------------------
 # Genius API Test on Startup
