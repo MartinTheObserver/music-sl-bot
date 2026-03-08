@@ -21,9 +21,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
-DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))  # Your Discord ID for ephemeral debug
-
-# API Ninja key for random word
+DEBUG_USER_ID = int(os.getenv("DEBUG_USER_ID"))
 API_NINJA_RANDOM_WORD_KEY = os.getenv("API_NINJA_RANDOM_WORD_KEY")
 
 # ---------------------------
@@ -45,8 +43,7 @@ threading.Thread(target=run_flask, daemon=True).start()
 # Discord Bot Setup
 # ---------------------------
 intents = discord.Intents.default()
-intents.message_content = True  # REQUIRED for prefix commands
-
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
@@ -57,7 +54,7 @@ with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
 # ---------------------------
-# Weird Laws Viewer Class
+# Weird Laws Viewer
 # ---------------------------
 class WeirdLawView(View):
     def __init__(self, laws, index=0):
@@ -93,7 +90,7 @@ class WeirdLawView(View):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 # ---------------------------
-# ZenQuotes Viewer Class
+# ZenQuotes Viewer
 # ---------------------------
 class ZenQuoteView(View):
     def __init__(self, quote_text="", author=""):
@@ -130,7 +127,7 @@ class ZenQuoteView(View):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 # ---------------------------
-# WordView Class
+# Fixed WordView Class
 # ---------------------------
 class WordView(View):
     def __init__(self):
@@ -145,44 +142,39 @@ class WordView(View):
         try:
             r = requests.get(url, headers=headers, timeout=15)
             r.raise_for_status()
-            return r.json().get("word", None)
-        except Exception as e:
-            print(f"[WordView] Random word fetch failed: {e}")
-            return None
+            word = r.json().get("word", "example")
+            if isinstance(word, list):
+                word = word[0]
+            return str(word)
+        except:
+            return "example"
 
     async def dictionary(self, word):
-        # Try DictionaryAPI first (exact match)
+        defs, examples, pron = [], [], "N/A"
         try:
             r = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=10)
             if r.status_code == 200:
-                data = r.json()
-                if isinstance(data, list) and len(data) > 0:
-                    entry = data[0]  # take first entry
-                    pron = entry.get("phonetics", [{}])[0].get("text", "N/A")
-                    defs, examples = [], []
-                    for meaning in entry.get("meanings", []):
-                        for d in meaning.get("definitions", []):
-                            # Only include definitions that contain the word exactly
-                            definition_text = d.get("definition", "")
-                            if definition_text:
-                                defs.append(definition_text)
-                            if d.get("example"):
-                                examples.append(d.get("example"))
-                    if defs:
-                        return pron, defs[:10], examples[:6]
-        except Exception:
+                data = r.json()[0]
+                if data.get("phonetics"):
+                    pron = data["phonetics"][0].get("text", "N/A")
+                for meaning in data.get("meanings", []):
+                    for d in meaning.get("definitions", []):
+                        defs.append(d.get("definition"))
+                        if d.get("example"):
+                            examples.append(d.get("example"))
+        except:
             pass
 
-        # Fallback to Datamuse if DictionaryAPI fails
-        try:
-            r = requests.get(f"https://api.datamuse.com/words?sp={word}&md=d&max=1", timeout=10)
-            data = r.json()
-            defs = []
-            if data and "defs" in data[0]:
-                defs = [d.split("\t")[1] for d in data[0]["defs"] if d.startswith("n\t") or d.startswith("v\t")]
-            return "N/A", defs[:10], []
-        except Exception:
-            return "N/A", [], []
+        if not defs:
+            try:
+                r = requests.get(f"https://api.datamuse.com/words?sp={word}&md=d&max=1", timeout=10)
+                data = r.json()
+                if data and "defs" in data[0]:
+                    defs = [d.split("\t")[1] for d in data[0]["defs"]]
+            except:
+                pass
+
+        return pron, defs[:10], examples[:8]
 
     async def related_words(self, word):
         try:
@@ -197,18 +189,21 @@ class WordView(View):
                 f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json",
                 timeout=10
             )
-            html = r.json().get("parse", {}).get("text", {}).get("*", "")
-            # Look for all Etymology headings and capture next paragraph
-            matches = re.findall(r"(?:<h[23].*?>Etymology.*?</h[23]>).*?<p>(.*?)</p>", html, re.S | re.I)
-            if matches:
-                text = re.sub("<.*?>", "", matches[0])
-                return text[:900]
-        except Exception:
+            html = r.json()["parse"]["text"]["*"]
+            matches = re.findall(r"<h[1-6][^>]*>Etymology.*?</h[1-6]>(.*?)<h[1-6]", html, re.S | re.I)
+            paragraphs = []
+            for match in matches:
+                text = re.sub("<.*?>", "", match).strip()
+                if text:
+                    paragraphs.append(text)
+            if paragraphs:
+                return "\n\n".join(paragraphs)[:900]
+        except:
             pass
         return "Etymology not found."
 
     async def generate(self):
-        word = await self.fetch_random_word() or "example"
+        word = await self.fetch_random_word()
         pron, defs, examples = await self.dictionary(word)
         rel = await self.related_words(word)
         ety = await self.etymology(word)
@@ -217,12 +212,15 @@ class WordView(View):
         self.page_types = []
 
         def build_embed(embed_word, title, content):
+            embed_word_str = str(embed_word)
             embed = discord.Embed(
-                title=embed_word.capitalize(),
-                url=f"https://www.google.com/search?q=define+{embed_word}",
+                title=embed_word_str.capitalize(),
+                url=f"https://www.google.com/search?q=define+{embed_word_str}",
                 description=f"Pronunciation: {pron}",
                 color=discord.Color.blurple()
             )
+            if len(content) > 1024:
+                content = content[:1020] + "…"
             embed.add_field(name=title, value=content or "N/A", inline=False)
             return embed
 
@@ -235,13 +233,14 @@ class WordView(View):
         if rel:
             self.pages.append(build_embed(word, "Related Words", ", ".join(rel[:15])))
             self.page_types.append("Related Words")
-        self.pages.append(build_embed(word, "Etymology", ety))
-        self.page_types.append("Etymology")
+        if ety:
+            self.pages.append(build_embed(word, "Etymology", ety))
+            self.page_types.append("Etymology")
 
         self.index = 0
         for i, embed in enumerate(self.pages):
             next_type = self.page_types[i + 1] if i + 1 < len(self.pages) else "End"
-            embed.set_footer(text=f"Page {i + 1}/{len(self.pages)} | Next: {next_type}")
+            embed.set_footer(text=f"Page {i+1}/{len(self.pages)} | Next: {next_type}")
 
     @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary, custom_id="word_prev")
     async def prev(self, interaction: discord.Interaction, button: Button):
@@ -263,9 +262,117 @@ class WordView(View):
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
 # ---------------------------
-# Prefix and Slash commands
 # ---------------------------
+# Song.link Helpers
+# ---------------------------
+def clean_song_title(title: str) -> str:
+    if not title:
+        return ""
+    title = re.sub(r"\(feat\.?.*?\)|\[feat\.?.*?\]", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\(.*?Remix.*?\)|\[.*?Remix.*?\]", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"[\[\]\(\)]", "", title)
+    title = re.sub(r"[^\w\s&'-]", "", title)
+    title = re.sub(r"\s+", " ", title)
+    return title.strip()
 
+async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False):
+    try:
+        r = requests.get(
+            "https://api.song.link/v1-alpha.1/links",
+            params={"url": query, "userCountry": "US"},
+            timeout=20
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data
+    except Exception as e:
+        if is_slash:
+            await ctx_or_interaction.followup.send(f"Error fetching song data: {e}")
+        else:
+            await ctx_or_interaction.send(f"Error fetching song data: {e}")
+        return None
+
+def get_genius_link(title: str, artist: str):
+    if not title or not GENIUS_API_KEY:
+        return None
+    clean_title_str = clean_song_title(title)
+    query = f"{clean_title_str} {artist}"
+    try:
+        r = requests.get(
+            "https://api.genius.com/search",
+            params={"q": query},
+            headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+            timeout=20
+        )
+        data = r.json()
+        hits = data.get("response", {}).get("hits", [])
+        for hit in hits:
+            result = hit.get("result", {})
+            result_title = result.get("title", "").lower()
+            result_artist = result.get("primary_artist", {}).get("name", "").lower()
+            if clean_title_str.lower() in result_title and artist.lower() in result_artist:
+                return result.get("url")
+        return hits[0]["result"].get("url") if hits else None
+    except Exception:
+        return None
+
+async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
+    entity_id = None
+    for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
+        if entity.get("type") == "song":
+            entity_id = uid
+            break
+    if not entity_id:
+        msg = "Could not parse song data."
+        if is_slash:
+            await ctx_or_interaction.followup.send(msg)
+        else:
+            await ctx_or_interaction.send(msg)
+        return
+
+    song = song_data["entitiesByUniqueId"][entity_id]
+    title = song.get("title", "Unknown Title")
+    artist = song.get("artistName", "Unknown Artist")
+    thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
+    genius_url = get_genius_link(title, artist)
+    platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
+    platform_links = "\n".join(
+        f"[{platform.replace('_',' ').title()}]({data['url']})"
+        for platform, data in platforms
+        if isinstance(data, dict) and "url" in data
+    )
+
+    # Split into 1000-char chunks
+    chunks, current_chunk = [], ""
+    for line in platform_links.split("\n"):
+        if len(current_chunk) + len(line) + 1 > 1000:
+            chunks.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk += ("\n" if current_chunk else "") + line
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    for i, chunk in enumerate(chunks):
+        embed = discord.Embed(
+            title=title,
+            url=genius_url if genius_url else None,
+            description=f"by {artist}",
+            color=0x1DB954
+        )
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
+        embed.add_field(name="Listen On", value=chunk, inline=False)
+        if len(chunks) > 1:
+            embed.set_footer(text=f"Page {i+1}/{len(chunks)}")
+        if is_slash:
+            await ctx_or_interaction.followup.send(embed=embed)
+        else:
+            await ctx_or_interaction.send(embed=embed)
+
+# ---------------------------
+# Commands
+# ---------------------------
 @bot.command(name="word")
 async def prefix_word(ctx):
     view = WordView()
@@ -308,14 +415,36 @@ async def slash_quote(interaction: discord.Interaction):
     await view.fetch_new_quote()
     await interaction.response.send_message(embed=view.create_embed(), view=view)
 
+@bot.command(name="sl")
+async def songlink_prefix(ctx, *, query: str):
+    if ctx.channel.id != ALLOWED_CHANNEL_ID:
+        return
+    song_data = await fetch_song_links(query, ctx, is_slash=False)
+    if not song_data:
+        await ctx.send("Could not find links for that song.")
+        return
+    await send_songlink_embed(ctx, song_data, is_slash=False)
+
+@tree.command(name="sl", description="Get song links", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(query="Paste Spotify, Apple, or YouTube link")
+async def songlink_slash(interaction: discord.Interaction, query: str):
+    if interaction.channel_id != ALLOWED_CHANNEL_ID:
+        await interaction.response.send_message("Not allowed in this channel.", ephemeral=True)
+        return
+    await interaction.response.defer()
+    song_data = await fetch_song_links(query, interaction, is_slash=True)
+    if not song_data:
+        await interaction.followup.send("Could not find links for that song.")
+        return
+    await send_songlink_embed(interaction, song_data, is_slash=True)
+
 # ---------------------------
-# Bot Event: on_ready with Railway-safe persistent views
+# Bot Event: on_ready with persistent views
 # ---------------------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
 
-    # Railway-safe persistent view registration
     if not any(isinstance(v, WordView) for v in bot.persistent_views):
         bot.add_view(WordView())
     if not any(isinstance(v, ZenQuoteView) for v in bot.persistent_views):
