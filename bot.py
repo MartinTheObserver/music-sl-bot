@@ -151,30 +151,37 @@ class WordView(View):
             return None
 
     async def dictionary(self, word):
+        # Try DictionaryAPI first (exact match)
         try:
             r = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=10)
             if r.status_code == 200:
-                data = r.json()[0]
-                pron = "N/A"
-                if data.get("phonetics"):
-                    pron = data["phonetics"][0].get("text", "N/A")
-                defs, examples = [], []
-                for meaning in data.get("meanings", []):
-                    for d in meaning.get("definitions", []):
-                        defs.append(d.get("definition"))
-                        if d.get("example"):
-                            examples.append(d.get("example"))
-                return pron, defs[:10], examples[:6]
-        except:
+                data = r.json()
+                if isinstance(data, list) and len(data) > 0:
+                    entry = data[0]  # take first entry
+                    pron = entry.get("phonetics", [{}])[0].get("text", "N/A")
+                    defs, examples = [], []
+                    for meaning in entry.get("meanings", []):
+                        for d in meaning.get("definitions", []):
+                            # Only include definitions that contain the word exactly
+                            definition_text = d.get("definition", "")
+                            if definition_text:
+                                defs.append(definition_text)
+                            if d.get("example"):
+                                examples.append(d.get("example"))
+                    if defs:
+                        return pron, defs[:10], examples[:6]
+        except Exception:
             pass
+
+        # Fallback to Datamuse if DictionaryAPI fails
         try:
             r = requests.get(f"https://api.datamuse.com/words?sp={word}&md=d&max=1", timeout=10)
             data = r.json()
             defs = []
             if data and "defs" in data[0]:
-                defs = [d.split("\t")[1] for d in data[0]["defs"]]
+                defs = [d.split("\t")[1] for d in data[0]["defs"] if d.startswith("n\t") or d.startswith("v\t")]
             return "N/A", defs[:10], []
-        except:
+        except Exception:
             return "N/A", [], []
 
     async def related_words(self, word):
@@ -186,30 +193,33 @@ class WordView(View):
 
     async def etymology(self, word):
         try:
-            r = requests.get(f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json", timeout=10)
-            html = r.json()["parse"]["text"]["*"]
-            m = re.search(r"Etymology.*?<p>(.*?)</p>", html, re.S)
-            if m:
-                text = re.sub("<.*?>", "", m.group(1))
+            r = requests.get(
+                f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json",
+                timeout=10
+            )
+            html = r.json().get("parse", {}).get("text", {}).get("*", "")
+            # Look for all Etymology headings and capture next paragraph
+            matches = re.findall(r"(?:<h[23].*?>Etymology.*?</h[23]>).*?<p>(.*?)</p>", html, re.S | re.I)
+            if matches:
+                text = re.sub("<.*?>", "", matches[0])
                 return text[:900]
-        except:
+        except Exception:
             pass
         return "Etymology not found."
 
     async def generate(self):
-        word = await self.fetch_random_word()
-        if not word:
-            word = "example"
+        word = await self.fetch_random_word() or "example"
         pron, defs, examples = await self.dictionary(word)
         rel = await self.related_words(word)
         ety = await self.etymology(word)
+
         self.pages = []
         self.page_types = []
 
         def build_embed(embed_word, title, content):
             embed = discord.Embed(
-                title=embed_word.capitalize() if isinstance(embed_word, str) else str(embed_word),
-                url=f"https://www.google.com/search?q=define+{word}",
+                title=embed_word.capitalize(),
+                url=f"https://www.google.com/search?q=define+{embed_word}",
                 description=f"Pronunciation: {pron}",
                 color=discord.Color.blurple()
             )
@@ -230,8 +240,8 @@ class WordView(View):
 
         self.index = 0
         for i, embed in enumerate(self.pages):
-            next_type = self.page_types[i+1] if i+1 < len(self.pages) else "End"
-            embed.set_footer(text=f"Page {i+1}/{len(self.pages)} | Next: {next_type}")
+            next_type = self.page_types[i + 1] if i + 1 < len(self.pages) else "End"
+            embed.set_footer(text=f"Page {i + 1}/{len(self.pages)} | Next: {next_type}")
 
     @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary, custom_id="word_prev")
     async def prev(self, interaction: discord.Interaction, button: Button):
