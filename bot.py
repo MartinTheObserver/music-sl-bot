@@ -27,17 +27,17 @@ API_NINJA_RANDOM_WORD_KEY = os.getenv("API_NINJA_RANDOM_WORD_KEY")
 # ---------------------------
 # Flask Web Server (Railway requirement)
 # ---------------------------
-app = Flask(__name__)
+#app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "Bot is alive."
+#@app.route("/")
+#def home():
+    #return "Bot is alive."
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+#def run_flask():
+    #port = int(os.environ.get("PORT", 10000))
+    #app.run(host="0.0.0.0", port=port)
 
-threading.Thread(target=run_flask, daemon=True).start()
+#threading.Thread(target=run_flask, daemon=True).start()
 
 # ---------------------------
 # Discord Bot Setup
