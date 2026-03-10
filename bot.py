@@ -503,36 +503,6 @@ async def slash_time(interaction: discord.Interaction, member: discord.Member):
 # World Clock
 # ---------------------------
 
-@bot.command(name="tz")
-async def tz(ctx):
-
-    embed = discord.Embed(
-        title="🌍 Server World Clock",
-        color=discord.Color.green()
-    )
-
-    if not timezones:
-        embed.description = "No timezones set yet."
-        await ctx.send(embed=embed)
-        return
-
-    for user_id, tz_name in timezones.items():
-
-        member = ctx.guild.get_member(int(user_id))
-        if not member:
-            continue
-
-        local_time = datetime.now(ZoneInfo(tz_name))
-
-        embed.add_field(
-            name=member.display_name,
-            value=f"{local_time.strftime('%A %I:%M %p')}\n`{tz_name}`",
-            inline=True
-        )
-
-    await ctx.send(embed=embed)
-
-
 @tree.command(name="worldclock", description="See everyone's local time", guild=discord.Object(id=GUILD_ID))
 async def worldclock(interaction: discord.Interaction):
 
@@ -632,10 +602,7 @@ async def songlink_slash(interaction: discord.Interaction, query: str):
         return
     await send_songlink_embed(interaction, song_data, is_slash=True)
 
-# ---------------------------
-# Timezone Commands
-# ---------------------------
-@bot.command(name="tz")
+bot.command(name="tz")
 async def tz(ctx):
     """Public embed showing all users' current times"""
     embed = discord.Embed(
