@@ -303,18 +303,18 @@ class QuoteView(View):
         quote = await fetch_quote(self.genre)
         embed = self.build_embed(quote)
 
-    try:
-        # If interaction has a response we already sent
-        if interaction.response.is_done():
-            # Edit the original message
-            await interaction.edit_original_message(embed=embed, view=self)
-        else:
-            # First response → send normally
-            await interaction.response.send_message(embed=embed, view=self)
-    except Exception as e:
-        print(f"QuoteView send_new_quote error: {e}")
-        # As a last resort, send ephemeral message
-        await interaction.followup.send(embed=embed, view=self, ephemeral=True)
+        try:
+            # If we already responded to this interaction
+            if interaction.response.is_done():
+                # Use edit_original_message for buttons
+                await interaction.edit_original_message(embed=embed, view=self)
+            else:
+                # First response to slash/prefix command
+                await interaction.response.send_message(embed=embed, view=self)
+        except Exception as e:
+            print(f"QuoteView send_new_quote error: {e}")
+            # Fallback: ephemeral followup message
+            await interaction.followup.send(embed=embed, view=self, ephemeral=True)
 
     @discord.ui.button(label="📋 Genres", style=discord.ButtonStyle.secondary, custom_id="quote_genres")
     async def genres(self, interaction: discord.Interaction, button: Button):
