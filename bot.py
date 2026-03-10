@@ -300,8 +300,8 @@ class QuoteView(View):
         return embed
 
     async def send_new_quote(self, interaction: discord.Interaction):
-    quote = await fetch_quote(self.genre)
-    embed = self.build_embed(quote)
+        quote = await fetch_quote(self.genre)
+        embed = self.build_embed(quote)
 
     try:
         # If interaction has a response we already sent
