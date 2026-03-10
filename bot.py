@@ -243,12 +243,15 @@ async def fetch_quote_garden(genre=None):
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
 
-        data = r.json()["data"][0]
+        data = r.json()
+        print(f"API Response: {data}")  # Debug line
+        
+        quote_data = data["data"][0]
 
         return {
-            "quote": data.get("quoteText","No quote found."),
-            "author": data.get("quoteAuthor","Unknown"),
-            "genre": data.get("quoteGenre")
+            "quote": quote_data.get("quoteText","No quote found."),
+            "author": quote_data.get("quoteAuthor","Unknown"),
+            "genre": quote_data.get("quoteGenre")
         }
 
     except Exception as e:
