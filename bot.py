@@ -12,7 +12,7 @@ import json
 import random
 from discord.ui import View, Button
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, available_timezones
 
 # ---------------------------
 # Load Environment Variables
@@ -370,6 +370,199 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
             await ctx_or_interaction.followup.send(embed=embed)
         else:
             await ctx_or_interaction.send(embed=embed)
+
+# ---------------------------
+# Timezone Storage
+# ---------------------------
+
+TIMEZONE_FILE = "timezones.json"
+
+def load_timezones():
+    try:
+        with open(TIMEZONE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_timezones(data):
+    with open(TIMEZONE_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+timezones = load_timezones()
+
+# ---------------------------
+# Timezone Autocomplete
+# ---------------------------
+
+async def timezone_autocomplete(interaction: discord.Interaction, current: str):
+    zones = sorted(available_timezones())
+
+    results = [
+        app_commands.Choice(name=z, value=z)
+        for z in zones if current.lower() in z.lower()
+    ][:25]
+
+    return results
+
+
+# ---------------------------
+# Set Timezone
+# ---------------------------
+
+@bot.command(name="settz")
+async def settz(ctx, zone: str):
+    """Set your timezone. Example: !settz America/New_York"""
+
+    try:
+        ZoneInfo(zone)
+    except:
+        await ctx.send("❌ Invalid timezone. Example: `!settz America/New_York`")
+        return
+
+    timezones[str(ctx.author.id)] = zone
+    save_timezones(timezones)
+
+    await ctx.send(f"✅ Timezone set to **{zone}**")
+
+
+@tree.command(name="settimezone", description="Set your timezone", guild=discord.Object(id=GUILD_ID))
+@app_commands.autocomplete(zone=timezone_autocomplete)
+async def settimezone(interaction: discord.Interaction, zone: str):
+
+    try:
+        ZoneInfo(zone)
+    except:
+        await interaction.response.send_message(
+            "❌ Invalid timezone.",
+            ephemeral=True
+        )
+        return
+
+    timezones[str(interaction.user.id)] = zone
+    save_timezones(timezones)
+
+    await interaction.response.send_message(
+        f"✅ Timezone set to **{zone}**",
+        ephemeral=True
+    )
+
+
+# ---------------------------
+# Check Someone's Time
+# ---------------------------
+
+@bot.command(name="time")
+async def time_user(ctx, member: discord.Member = None):
+
+    member = member or ctx.author
+    tz = timezones.get(str(member.id))
+
+    if not tz:
+        await ctx.send(f"{member.display_name} has not set a timezone.")
+        return
+
+    local_time = datetime.now(ZoneInfo(tz))
+
+    embed = discord.Embed(
+        title=f"🕒 {member.display_name}'s Time",
+        description=local_time.strftime("%A, %B %d\n%I:%M %p"),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_footer(text=tz)
+
+    await ctx.send(embed=embed)
+
+
+@tree.command(name="time", description="Check someone's local time", guild=discord.Object(id=GUILD_ID))
+async def slash_time(interaction: discord.Interaction, member: discord.Member):
+
+    tz = timezones.get(str(member.id))
+
+    if not tz:
+        await interaction.response.send_message(
+            f"{member.display_name} has not set a timezone.",
+            ephemeral=True
+        )
+        return
+
+    local_time = datetime.now(ZoneInfo(tz))
+
+    embed = discord.Embed(
+        title=f"🕒 {member.display_name}'s Time",
+        description=local_time.strftime("%A, %B %d\n%I:%M %p"),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_footer(text=tz)
+
+    await interaction.response.send_message(embed=embed)
+
+
+# ---------------------------
+# World Clock
+# ---------------------------
+
+@bot.command(name="tz")
+async def tz(ctx):
+
+    embed = discord.Embed(
+        title="🌍 Server World Clock",
+        color=discord.Color.green()
+    )
+
+    if not timezones:
+        embed.description = "No timezones set yet."
+        await ctx.send(embed=embed)
+        return
+
+    for user_id, tz_name in timezones.items():
+
+        member = ctx.guild.get_member(int(user_id))
+        if not member:
+            continue
+
+        local_time = datetime.now(ZoneInfo(tz_name))
+
+        embed.add_field(
+            name=member.display_name,
+            value=f"{local_time.strftime('%A %I:%M %p')}\n`{tz_name}`",
+            inline=True
+        )
+
+    await ctx.send(embed=embed)
+
+
+@tree.command(name="worldclock", description="See everyone's local time", guild=discord.Object(id=GUILD_ID))
+async def worldclock(interaction: discord.Interaction):
+
+    embed = discord.Embed(
+        title="🌍 Server World Clock",
+        color=discord.Color.green()
+    )
+
+    guild = interaction.guild
+
+    if not timezones:
+        embed.description = "No timezones set yet."
+        await interaction.response.send_message(embed=embed)
+        return
+
+    for user_id, tz_name in timezones.items():
+
+        member = guild.get_member(int(user_id))
+        if not member:
+            continue
+
+        local_time = datetime.now(ZoneInfo(tz_name))
+
+        embed.add_field(
+            name=member.display_name,
+            value=f"{local_time.strftime('%A %I:%M %p')}\n`{tz_name}`",
+            inline=True
+        )
+
+    await interaction.response.send_message(embed=embed)
 
 # ---------------------------
 # Commands
