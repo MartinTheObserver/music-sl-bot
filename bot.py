@@ -635,19 +635,6 @@ async def songlink_slash(interaction: discord.Interaction, query: str):
 # ---------------------------
 # Timezone Commands
 # ---------------------------
-@bot.command(name="settz")
-async def settz(ctx, zone: str):
-    """Set your timezone. Example: !settz America/New_York"""
-    try:
-        ZoneInfo(zone)
-    except Exception:
-        await ctx.send("❌ Invalid timezone. Example: `!settz America/New_York`")
-        return
-
-    timezones[str(ctx.author.id)] = zone
-    save_timezones(timezones)
-    await ctx.send(f"✅ Timezone set to `{zone}`")
-
 @bot.command(name="tz")
 async def tz(ctx):
     """Public embed showing all users' current times"""
