@@ -9,7 +9,7 @@ import discord
 
 from discord.ext import commands
 from discord import app_commands
-from discord.ui import View, Button, Modal, TextInput
+from discord.ui import Select, View, Button, Modal, TextInput
 
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
@@ -121,6 +121,52 @@ async def timezone_sync_loop():
         await asyncio.sleep(300)
 
         await push_timezones_to_github()
+
+GEONAMES_USER = "martintheobserver"
+
+def search_location(location: str, max_results=10):
+    """Search GeoNames for top matching locations."""
+    url = f"http://api.geonames.org/searchJSON?q={location}&maxRows={max_results}&username={GEONAMES_USER}"
+    res = requests.get(url).json()
+    if not res.get("geonames"):
+        return []
+    return res["geonames"]
+
+def get_timezone(lat, lng):
+    """Get IANA timezone for given coordinates."""
+    url = f"http://api.geonames.org/timezoneJSON?lat={lat}&lng={lng}&username={GEONAMES_USER}"
+    res = requests.get(url).json()
+    return res.get("timezoneId")
+
+class ZoneSelect(View):
+    def __init__(self, results):
+        super().__init__(timeout=60)
+        self.results = results
+        options = []
+
+        for city in results:
+            city_name = city["name"]
+            region = city.get("adminName1")
+            country = city["countryName"]
+            label = f"{city_name}, {region}, {country}" if region else f"{city_name}, {country}"
+            options.append(discord.SelectOption(label=label, value=str(results.index(city))))
+
+        self.select = Select(placeholder="Select your location...", options=options)
+        self.select.callback = self.callback
+        self.add_item(self.select)
+
+    async def callback(self, interaction: discord.Interaction):
+        index = int(self.select.values[0])
+        city = self.results[index]
+        tz = get_timezone(city["lat"], city["lng"])
+        city_name = city["name"]
+        region = city.get("adminName1")
+        country = city["countryName"]
+        region_text = f", {region}" if region else ""
+        await interaction.response.send_message(
+            f"🌍 You selected {city_name}{region_text}, {country} → `{tz}`"
+        )
+        self.stop()
 
 # ---------------------------
 # Song.link API
@@ -545,8 +591,51 @@ async def ecm(ctx):
         inline=False
     )
 
+    embed.add_field(
+        name="!zone <link>",
+        value="Discover your timezone",
+        inline=False
+    )
+
     await ctx.send(embed=embed)
 
+@bot.command(name="zone")
+async def zone(ctx, *, location: str):
+    """Get timezone from vague location input with country/continent fallback or dropdown for states/cities."""
+    results = search_location(location)
+
+    if not results:
+        await ctx.send(f"❌ Could not find any matches for `{location}`.")
+        return
+
+    # Auto-select single match
+    if len(results) == 1:
+        city = results[0]
+        tz = get_timezone(city["lat"], city["lng"])
+        city_name = city["name"]
+        region = city.get("adminName1")
+        country = city["countryName"]
+        region_text = f", {region}" if region else ""
+        await ctx.send(f"🌍 {city_name}{region_text}, {country} → `{tz}`")
+        return
+
+    # Fallback for country/continent only
+    if len(location.split(",")) == 1 and len(location) <= 20:
+        city = results[0]  # largest/central city
+        tz = get_timezone(city["lat"], city["lng"])
+        city_name = city["name"]
+        region = city.get("adminName1")
+        country = city["countryName"]
+        region_text = f", {region}" if region else ""
+        await ctx.send(
+            f"🌍 Using the most central/major location for `{location}`: "
+            f"{city_name}{region_text}, {country} → `{tz}`"
+        )
+        return
+
+    # Otherwise show dropdown for state/province/city
+    view = ZoneSelect(results)
+    await ctx.send(f"Select the location for `{location}`:", view=view)
 
 # ---------------------------
 # Slash Commands
