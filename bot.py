@@ -1,6 +1,6 @@
 import os
 import re
-import requests
+import aiohttp
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -103,37 +103,41 @@ class WordView(View):
         url = "https://api.api-ninjas.com/v1/randomword"
         headers = {"X-Api-Key": API_NINJA_RANDOM_WORD_KEY}
         try:
-            r = requests.get(url, headers=headers, timeout=15)
-            r.raise_for_status()
-            word = r.json().get("word", "example")
-            if isinstance(word, list):
-                word = word[0]
-            return str(word)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=15) as r:
+                    data = await r.json()
+                    word = data.get("word", "example")
+                    if isinstance(word, list):
+                        word = word[0]
+                    return str(word)
         except:
             return "example"
 
     async def dictionary(self, word):
         defs, examples, pron = [], [], "N/A"
         try:
-            r = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=10)
-            if r.status_code == 200:
-                data = r.json()[0]
-                if data.get("phonetics"):
-                    pron = data["phonetics"][0].get("text", "N/A")
-                for meaning in data.get("meanings", []):
-                    for d in meaning.get("definitions", []):
-                        defs.append(d.get("definition"))
-                        if d.get("example"):
-                            examples.append(d.get("example"))
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=10) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        data = data[0]
+                        if data.get("phonetics"):
+                            pron = data["phonetics"][0].get("text", "N/A")
+                        for meaning in data.get("meanings", []):
+                            for d in meaning.get("definitions", []):
+                                defs.append(d.get("definition"))
+                                if d.get("example"):
+                                    examples.append(d.get("example"))
         except:
             pass
 
         if not defs:
             try:
-                r = requests.get(f"https://api.datamuse.com/words?sp={word}&md=d&max=1", timeout=10)
-                data = r.json()
-                if data and "defs" in data[0]:
-                    defs = [d.split("\t")[1] for d in data[0]["defs"]]
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"https://api.datamuse.com/words?sp={word}&md=d&max=1", timeout=10) as r:
+                        data = await r.json()
+                        if data and "defs" in data[0]:
+                            defs = [d.split("\t")[1] for d in data[0]["defs"]]
             except:
                 pass
 
@@ -141,18 +145,21 @@ class WordView(View):
 
     async def related_words(self, word):
         try:
-            r = requests.get(f"https://api.datamuse.com/words?ml={word}&max=20", timeout=10)
-            return [x["word"] for x in r.json()]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://api.datamuse.com/words?ml={word}&max=20", timeout=10) as r:
+                    data = await r.json()
+                    return [x["word"] for x in data]
         except:
             return []
 
     async def etymology(self, word):
         try:
-            r = requests.get(
-                f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json",
-                timeout=10
-            )
-            html = r.json()["parse"]["text"]["*"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json",
+                    timeout=10
+                ) as r:
+                    html = (await r.json())["parse"]["text"]["*"]
             matches = re.findall(r"<h[1-6][^>]*>Etymology.*?</h[1-6]>(.*?)<h[1-6]", html, re.S | re.I)
             paragraphs = []
             for match in matches:
@@ -225,9 +232,9 @@ class WordView(View):
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
 # ---------------------------
-# QuoteGarden Genres
+# Async Quote Helpers
 # ---------------------------
-QUOTE_GARDEN_GENRES = [
+QUOTE_GENRES = [
     "wisdom", "inspirational", "success", "life", "motivational",
     "happiness", "hope", "love", "friendship", "humor", "knowledge",
     "change", "courage", "attitude", "art", "beauty", "business",
@@ -235,30 +242,27 @@ QUOTE_GARDEN_GENRES = [
     "religion", "philosophy"
 ]
 
-async def fetch_quote_garden(genre=None):
+async def fetch_quote(genre=None):
+    url = "https://api.quotable.io/random"
+    params = {}
+    if genre:
+        params["tags"] = genre
     try:
-        url = "https://api.quotable.io/random"
-        params = {}
-        if genre:
-            params["tags"] = genre
-
-        r = requests.get(url, params=params, timeout=15)
-        r.raise_for_status()
-
-        data = r.json()
-
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=15) as r:
+                if r.status != 200:
+                    raise Exception(f"Status code {r.status}")
+                data = await r.json()
         return {
             "quote": data.get("content", "No quote found."),
             "author": data.get("author", "Unknown"),
             "genre": data.get("tags", [None])[0] if data.get("tags") else None
         }
-
     except Exception as e:
         print(f"Quote fetch error: {e}")
-        return {"quote":"Error fetching quote.","author":"","genre":None}
+        return {"quote": "Error fetching quote.", "author": "", "genre": None}
 
 class GenreModal(discord.ui.Modal, title="Set Quote Genre"):
-
     genre = discord.ui.TextInput(
         label="Enter a genre",
         placeholder="Example: inspirational",
@@ -271,78 +275,55 @@ class GenreModal(discord.ui.Modal, title="Set Quote Genre"):
         self.view = view
 
     async def on_submit(self, interaction: discord.Interaction):
-
         self.view.genre = self.genre.value.lower()
-
-        quote = await fetch_quote_garden(self.view.genre)
-
+        quote = await fetch_quote(self.view.genre)
         embed = self.view.build_embed(quote)
-
         await interaction.response.edit_message(embed=embed, view=self.view)
 
 # ---------------------------
-# QuoteGarden Viewer
+# Quote View
 # ---------------------------
-class QuoteGardenView(View):
-
+class QuoteView(View):
     def __init__(self):
         super().__init__(timeout=None)
         self.genre = None
 
     def build_embed(self, quote):
-
         embed = discord.Embed(
             title="💬 Quote",
             description=f"“{quote['quote']}”\n\n— {quote['author']}",
             color=discord.Color.green()
         )
-
         genre_text = self.genre if self.genre else "Random"
-
         embed.set_footer(text=f"Genre: {genre_text}")
-
         return embed
 
     async def send_new_quote(self, interaction):
-
-        quote = await fetch_quote_garden(self.genre)
-
+        quote = await fetch_quote(self.genre)
         embed = self.build_embed(quote)
-
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="📋 Genres", style=discord.ButtonStyle.secondary, custom_id="quote_genres")
     async def genres(self, interaction: discord.Interaction, button: Button):
-
-        genre_text = "\n".join(QUOTE_GARDEN_GENRES)
-
-        await interaction.response.send_message(
-            f"**Available Genres**\n\n{genre_text}",
-            ephemeral=True
-        )
+        genre_text = "\n".join(QUOTE_GENRES)
+        await interaction.response.send_message(f"**Available Genres**\n\n{genre_text}", ephemeral=True)
 
     @discord.ui.button(label="🔎 Set Genre", style=discord.ButtonStyle.secondary, custom_id="quote_set_genre")
     async def set_genre(self, interaction: discord.Interaction, button: Button):
-
         await interaction.response.send_modal(GenreModal(self))
 
     @discord.ui.button(label="🎯 Random Genre", style=discord.ButtonStyle.secondary, custom_id="quote_random_genre")
     async def random_genre(self, interaction: discord.Interaction, button: Button):
-
-        self.genre = random.choice(QUOTE_GARDEN_GENRES)
-
+        self.genre = random.choice(QUOTE_GENRES)
         await self.send_new_quote(interaction)
 
     @discord.ui.button(label="🧹 Clear Filter", style=discord.ButtonStyle.secondary, custom_id="quote_clear_filter")
     async def clear_filter(self, interaction: discord.Interaction, button: Button):
-
         self.genre = None
-
         await self.send_new_quote(interaction)
 
     @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary, custom_id="quote_new")
     async def new_quote(self, interaction: discord.Interaction, button: Button):
-
         await self.send_new_quote(interaction)
 
 # ---------------------------
@@ -357,8 +338,6 @@ def clean_song_title(title: str) -> str:
     title = re.sub(r"[^\w\s&'-]", "", title)
     title = re.sub(r"\s+", " ", title)
     return title.strip()
-
-# (songlink helper functions remain exactly the same here)
 
 # ---------------------------
 # Commands
@@ -395,20 +374,14 @@ async def slash_weird(interaction: discord.Interaction):
 
 @bot.command(name="quote")
 async def prefix_quote(ctx):
-
-    view = QuoteGardenView()
-
-    quote = await fetch_quote_garden()
-
+    view = QuoteView()
+    quote = await fetch_quote()
     await ctx.send(embed=view.build_embed(quote), view=view)
 
 @tree.command(name="quote", description="Random inspirational quote", guild=discord.Object(id=GUILD_ID))
 async def slash_quote(interaction: discord.Interaction):
-
-    view = QuoteGardenView()
-
-    quote = await fetch_quote_garden()
-
+    view = QuoteView()
+    quote = await fetch_quote()
     await interaction.response.send_message(embed=view.build_embed(quote), view=view)
 
 # ---------------------------
@@ -422,8 +395,8 @@ async def on_ready():
         bot.add_view(WordView())
     if not any(isinstance(v, WeirdLawView) for v in bot.persistent_views):
         bot.add_view(WeirdLawView(list(WEIRD_LAWS.values())))
-    if not any(isinstance(v, QuoteGardenView) for v in bot.persistent_views):
-        bot.add_view(QuoteGardenView())
+    if not any(isinstance(v, QuoteView) for v in bot.persistent_views):
+        bot.add_view(QuoteView())
 
     await tree.sync()
     print("Commands synced.")
