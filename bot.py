@@ -228,30 +228,29 @@ class WordView(View):
 # QuoteGarden Genres
 # ---------------------------
 QUOTE_GARDEN_GENRES = [
-    "inspirational","life","success","wisdom","motivational","happiness","hope","love",
-    "friendship","humor","knowledge","change","courage","attitude","art","beauty",
-    "business","communication","education","time"
+    "wisdom", "inspirational", "success", "life", "motivational",
+    "happiness", "hope", "love", "friendship", "humor", "knowledge",
+    "change", "courage", "attitude", "art", "beauty", "business",
+    "communication", "education", "time", "technology", "famous-quotes",
+    "religion", "philosophy"
 ]
 
 async def fetch_quote_garden(genre=None):
     try:
-        url = "https://quote-garden.onrender.com/api/v3/quotes/random"
+        url = "https://api.quotable.io/random"
         params = {}
         if genre:
-            params["genre"] = genre
+            params["tags"] = genre
 
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
 
         data = r.json()
-        print(f"API Response: {data}")  # Debug line
-        
-        quote_data = data["data"][0]
 
         return {
-            "quote": quote_data.get("quoteText","No quote found."),
-            "author": quote_data.get("quoteAuthor","Unknown"),
-            "genre": quote_data.get("quoteGenre")
+            "quote": data.get("content", "No quote found."),
+            "author": data.get("author", "Unknown"),
+            "genre": data.get("tags", [None])[0] if data.get("tags") else None
         }
 
     except Exception as e:
