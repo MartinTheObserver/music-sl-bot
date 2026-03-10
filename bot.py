@@ -251,7 +251,8 @@ async def fetch_quote_garden(genre=None):
             "genre": data.get("quoteGenre")
         }
 
-    except:
+    except Exception as e:
+        print(f"Quote fetch error: {e}")
         return {"quote":"Error fetching quote.","author":"","genre":None}
 
 class GenreModal(discord.ui.Modal, title="Set Quote Genre"):
