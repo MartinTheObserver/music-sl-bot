@@ -11,6 +11,8 @@ import asyncio
 import json
 import random
 from discord.ui import View, Button
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # ---------------------------
 # Load Environment Variables
@@ -262,7 +264,6 @@ class WordView(View):
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
 # ---------------------------
-# ---------------------------
 # Song.link Helpers
 # ---------------------------
 def clean_song_title(title: str) -> str:
@@ -437,6 +438,45 @@ async def songlink_slash(interaction: discord.Interaction, query: str):
         await interaction.followup.send("Could not find links for that song.")
         return
     await send_songlink_embed(interaction, song_data, is_slash=True)
+
+# ---------------------------
+# Timezone Commands
+# ---------------------------
+@bot.command(name="settz")
+async def settz(ctx, zone: str):
+    """Set your timezone. Example: !settz America/New_York"""
+    try:
+        ZoneInfo(zone)
+    except Exception:
+        await ctx.send("❌ Invalid timezone. Example: `!settz America/New_York`")
+        return
+
+    timezones[str(ctx.author.id)] = zone
+    save_timezones(timezones)
+    await ctx.send(f"✅ Timezone set to `{zone}`")
+
+@bot.command(name="tz")
+async def tz(ctx):
+    """Public embed showing all users' current times"""
+    embed = discord.Embed(
+        title="🌍 All User Times",
+        color=discord.Color.green()
+    )
+
+    if not timezones:
+        embed.description = "No timezones set yet."
+    else:
+        for user_id, tz_name in timezones.items():
+            member = ctx.guild.get_member(int(user_id))
+            if member:
+                local_time = datetime.now(ZoneInfo(tz_name))
+                embed.add_field(
+                    name=member.display_name,
+                    value=local_time.strftime("%A, %I:%M %p"),
+                    inline=False
+                )
+
+    await ctx.send(embed=embed)
 
 # ---------------------------
 # Bot Event: on_ready with persistent views
