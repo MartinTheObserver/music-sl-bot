@@ -11,7 +11,6 @@ import asyncio
 import json
 import random
 from discord.ui import View, Button
-import aiohttp  # for async quote fetch
 
 # ---------------------------
 # Load Environment Variables
@@ -91,7 +90,44 @@ class WeirdLawView(View):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 # ---------------------------
-# WordView (unchanged)
+# ZenQuotes Viewer
+# ---------------------------
+class ZenQuoteView(View):
+    def __init__(self, quote_text="", author=""):
+        super().__init__(timeout=None)
+        self.quote_text = quote_text
+        self.author = author
+
+    def create_embed(self):
+        embed = discord.Embed(
+            title="💬 Random Quote",
+            description=f"“{self.quote_text}”\n\n— {self.author}" if self.author else f"“{self.quote_text}”",
+            color=discord.Color.green()
+        )
+        return embed
+
+    async def fetch_new_quote(self):
+        try:
+            r = requests.get("https://zenquotes.io/api/random", timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0:
+                self.quote_text = data[0].get("q", "No quote found")
+                self.author = data[0].get("a", "")
+            else:
+                self.quote_text = "No quote found"
+                self.author = ""
+        except Exception as e:
+            self.quote_text = f"Error fetching quote: {e}"
+            self.author = ""
+
+    @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary, custom_id="quote_new")
+    async def new_quote(self, interaction: discord.Interaction, button: Button):
+        await self.fetch_new_quote()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+# ---------------------------
+# Fixed WordView Class
 # ---------------------------
 class WordView(View):
     def __init__(self):
@@ -226,7 +262,8 @@ class WordView(View):
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
 # ---------------------------
-# Song.link Helpers (unchanged)
+# ---------------------------
+# Song.link Helpers
 # ---------------------------
 def clean_song_title(title: str) -> str:
     if not title:
@@ -334,106 +371,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
             await ctx_or_interaction.send(embed=embed)
 
 # ---------------------------
-# Quote System
-# ---------------------------
-QUOTE_GENRES = [
-    "wisdom", "inspirational", "success", "life", "motivational",
-    "happiness", "hope", "love", "friendship", "humor", "knowledge",
-    "change", "courage", "attitude", "art", "beauty", "business",
-    "communication", "education", "time", "technology", "famous-quotes",
-    "religion", "philosophy"
-]
-
-async def fetch_quote(genre=None):
-    url = "https://api.quotable.io/random"
-    params = {}
-    if genre:
-        params["tags"] = genre
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=15) as r:
-                if r.status != 200:
-                    raise Exception(f"Status code {r.status}")
-                data = await r.json()
-        return {
-            "quote": data.get("content", "No quote found."),
-            "author": data.get("author", "Unknown"),
-            "genre": data.get("tags", [None])[0] if data.get("tags") else None
-        }
-    except Exception as e:
-        print(f"Quote fetch error: {e}")
-        return {"quote": "Error fetching quote.", "author": "", "genre": None}
-
-class GenreModal(discord.ui.Modal, title="Set Quote Genre"):
-    genre = discord.ui.TextInput(
-        label="Enter a genre",
-        placeholder="Example: inspirational",
-        required=True,
-        max_length=50
-    )
-
-    def __init__(self, view):
-        super().__init__()
-        self.view = view
-
-    async def on_submit(self, interaction: discord.Interaction):
-        self.view.genre = self.genre.value.lower()
-        quote = await fetch_quote(self.view.genre)
-        embed = self.view.build_embed(quote)
-        await interaction.response.edit_message(embed=embed, view=self.view)
-
-class QuoteView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.genre = None
-
-    def build_embed(self, quote):
-        embed = discord.Embed(
-            title="💬 Quote",
-            description=f"“{quote['quote']}”\n\n— {quote['author']}",
-            color=discord.Color.green()
-        )
-        genre_text = self.genre if self.genre else "Random"
-        embed.set_footer(text=f"Genre: {genre_text}")
-        return embed
-
-    async def send_new_quote(self, interaction: discord.Interaction):
-        quote = await fetch_quote(self.genre)
-        embed = self.build_embed(quote)
-
-        try:
-            if interaction.response.is_done():
-                await interaction.edit_original_message(embed=embed, view=self)
-            else:
-                await interaction.response.send_message(embed=embed, view=self)
-        except Exception as e:
-            print(f"QuoteView send_new_quote error: {e}")
-            await interaction.followup.send(embed=embed, view=self, ephemeral=True)
-
-    @discord.ui.button(label="📋 Genres", style=discord.ButtonStyle.secondary, custom_id="quote_genres")
-    async def genres(self, interaction: discord.Interaction, button: Button):
-        genre_text = "\n".join(QUOTE_GENRES)
-        await interaction.response.send_message(f"**Available Genres**\n\n{genre_text}", ephemeral=True)
-
-    @discord.ui.button(label="🔎 Set Genre", style=discord.ButtonStyle.secondary, custom_id="quote_set_genre")
-    async def set_genre(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(GenreModal(self))
-
-    @discord.ui.button(label="🎯 Random Genre", style=discord.ButtonStyle.secondary, custom_id="quote_random_genre")
-    async def random_genre(self, interaction: discord.Interaction, button: Button):
-        self.genre = random.choice(QUOTE_GENRES)
-        await self.send_new_quote(interaction)
-
-    @discord.ui.button(label="🧹 Clear Filter", style=discord.ButtonStyle.secondary, custom_id="quote_clear_filter")
-    async def clear_filter(self, interaction: discord.Interaction, button: Button):
-        self.genre = None
-        await self.send_new_quote(interaction)
-
-    @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary, custom_id="quote_new")
-    async def new_quote(self, interaction: discord.Interaction, button: Button):
-        await self.send_new_quote(interaction)
-
-# ---------------------------
 # Commands
 # ---------------------------
 @bot.command(name="word")
@@ -468,15 +405,15 @@ async def slash_weird(interaction: discord.Interaction):
 
 @bot.command(name="quote")
 async def prefix_quote(ctx):
-    view = QuoteView()
-    quote = await fetch_quote()
-    await ctx.send(embed=view.build_embed(quote), view=view)
+    view = ZenQuoteView()
+    await view.fetch_new_quote()
+    await ctx.send(embed=view.create_embed(), view=view)
 
 @tree.command(name="quote", description="Random inspirational quote", guild=discord.Object(id=GUILD_ID))
 async def slash_quote(interaction: discord.Interaction):
-    view = QuoteView()
-    quote = await fetch_quote()
-    await interaction.response.send_message(embed=view.build_embed(quote), view=view)
+    view = ZenQuoteView()
+    await view.fetch_new_quote()
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
 
 @bot.command(name="sl")
 async def songlink_prefix(ctx, *, query: str):
@@ -510,8 +447,8 @@ async def on_ready():
 
     if not any(isinstance(v, WordView) for v in bot.persistent_views):
         bot.add_view(WordView())
-    if not any(isinstance(v, QuoteView) for v in bot.persistent_views):
-        bot.add_view(QuoteView())
+    if not any(isinstance(v, ZenQuoteView) for v in bot.persistent_views):
+        bot.add_view(ZenQuoteView())
     if not any(isinstance(v, WeirdLawView) for v in bot.persistent_views):
         bot.add_view(WeirdLawView(list(WEIRD_LAWS.values())))
 
