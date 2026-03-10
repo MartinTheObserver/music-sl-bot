@@ -300,19 +300,21 @@ class QuoteView(View):
         return embed
 
     async def send_new_quote(self, interaction: discord.Interaction):
-        quote = await fetch_quote(self.genre)
-        embed = self.build_embed(quote)
+    quote = await fetch_quote(self.genre)
+    embed = self.build_embed(quote)
 
-        try:
-            # If the interaction already has a response (button click after first message)
-            if interaction.response.is_done():
-                await interaction.message.edit(embed=embed, view=self)
-            else:
-                # First response to interaction (slash command)
-                await interaction.response.send_message(embed=embed, view=self)
-        except AttributeError:
-            # Fallback if interaction.message is None
+    try:
+        # If interaction has a response we already sent
+        if interaction.response.is_done():
+            # Edit the original message
+            await interaction.edit_original_message(embed=embed, view=self)
+        else:
+            # First response → send normally
             await interaction.response.send_message(embed=embed, view=self)
+    except Exception as e:
+        print(f"QuoteView send_new_quote error: {e}")
+        # As a last resort, send ephemeral message
+        await interaction.followup.send(embed=embed, view=self, ephemeral=True)
 
     @discord.ui.button(label="📋 Genres", style=discord.ButtonStyle.secondary, custom_id="quote_genres")
     async def genres(self, interaction: discord.Interaction, button: Button):
