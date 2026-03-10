@@ -282,7 +282,7 @@ class GenreModal(discord.ui.Modal, title="Set Quote Genre"):
 
 
 # ---------------------------
-# Quote View (Fixed)
+# Quote View (Fully Fixed & Indented)
 # ---------------------------
 class QuoteView(View):
     def __init__(self):
@@ -300,20 +300,19 @@ class QuoteView(View):
         return embed
 
     async def send_new_quote(self, interaction: discord.Interaction):
-    quote = await fetch_quote(self.genre)
-    embed = self.build_embed(quote)
+        quote = await fetch_quote(self.genre)
+        embed = self.build_embed(quote)
 
-    # Prefer editing the original message if possible
-    try:
-        if interaction.response.is_done():
-            # Already responded → edit the message
-            await interaction.message.edit(embed=embed, view=self)
-        else:
-            # First response → respond directly
+        try:
+            # If the interaction already has a response (button click after first message)
+            if interaction.response.is_done():
+                await interaction.message.edit(embed=embed, view=self)
+            else:
+                # First response to interaction (slash command)
+                await interaction.response.send_message(embed=embed, view=self)
+        except AttributeError:
+            # Fallback if interaction.message is None
             await interaction.response.send_message(embed=embed, view=self)
-    except AttributeError:
-        # Fallback in case interaction.message is None
-        await interaction.response.send_message(embed=embed, view=self)
 
     @discord.ui.button(label="📋 Genres", style=discord.ButtonStyle.secondary, custom_id="quote_genres")
     async def genres(self, interaction: discord.Interaction, button: Button):
