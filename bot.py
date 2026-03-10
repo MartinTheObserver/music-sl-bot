@@ -10,7 +10,7 @@ import threading
 import asyncio
 import json
 import random
-from discord.ui import View, Button
+from discord.ui import View, Button, Modal, TextInput
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -56,7 +56,7 @@ with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
 # ---------------------------
-# Weird Laws Viewer
+# Persistent Views
 # ---------------------------
 class WeirdLawView(View):
     def __init__(self, laws, index=0):
@@ -91,9 +91,6 @@ class WeirdLawView(View):
         self.index = (self.index + 1) % len(self.laws)
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
-# ---------------------------
-# ZenQuotes Viewer
-# ---------------------------
 class ZenQuoteView(View):
     def __init__(self, quote_text="", author=""):
         super().__init__(timeout=None)
@@ -128,9 +125,6 @@ class ZenQuoteView(View):
         await self.fetch_new_quote()
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
-# ---------------------------
-# Fixed WordView Class
-# ---------------------------
 class WordView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -343,7 +337,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
         if isinstance(data, dict) and "url" in data
     )
 
-    # Split into 1000-char chunks
     chunks, current_chunk = [], ""
     for line in platform_links.split("\n"):
         if len(current_chunk) + len(line) + 1 > 1000:
@@ -374,7 +367,6 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
 # ---------------------------
 # Timezone Storage
 # ---------------------------
-
 TIMEZONE_FILE = "timezones.json"
 
 def load_timezones():
@@ -391,163 +383,90 @@ def save_timezones(data):
 timezones = load_timezones()
 
 # ---------------------------
-# Timezone Autocomplete
+# Timezone Modal for Interactive !time
 # ---------------------------
-
-async def timezone_autocomplete(interaction: discord.Interaction, current: str):
-    zones = sorted(available_timezones())
-
-    results = [
-        app_commands.Choice(name=z, value=z)
-        for z in zones if current.lower() in z.lower()
-    ][:25]
-
-    return results
-
-
-# ---------------------------
-# Set Timezone
-# ---------------------------
-
-@bot.command(name="settz")
-async def settz(ctx, zone: str):
-    """Set your timezone. Example: !settz America/New_York"""
-
-    try:
-        ZoneInfo(zone)
-    except:
-        await ctx.send("❌ Invalid timezone. Example: `!settz America/New_York`")
-        return
-
-    timezones[str(ctx.author.id)] = zone
-    save_timezones(timezones)
-
-    await ctx.send(f"✅ Timezone set to **{zone}**")
-
-
-@tree.command(name="settimezone", description="Set your timezone", guild=discord.Object(id=GUILD_ID))
-@app_commands.autocomplete(zone=timezone_autocomplete)
-async def settimezone(interaction: discord.Interaction, zone: str):
-
-    try:
-        ZoneInfo(zone)
-    except:
-        await interaction.response.send_message(
-            "❌ Invalid timezone.",
-            ephemeral=True
+class TimezoneModal(Modal):
+    def __init__(self, user_id):
+        super().__init__(title="Set Your Timezone")
+        self.user_id = user_id
+        self.tz_input = TextInput(
+            label="Enter your timezone or city",
+            placeholder="America/New_York or New York",
+            style=discord.TextStyle.short,
+            required=True
         )
-        return
+        self.add_item(self.tz_input)
 
-    timezones[str(interaction.user.id)] = zone
-    save_timezones(timezones)
+    async def on_submit(self, interaction: discord.Interaction):
+        zone = self.tz_input.value.strip()
+        if zone in available_timezones():
+            tz_name = zone
+        else:
+            matches = [z for z in available_timezones() if zone.lower() in z.lower()]
+            tz_name = matches[0] if matches else None
 
-    await interaction.response.send_message(
-        f"✅ Timezone set to **{zone}**",
-        ephemeral=True
-    )
+        if not tz_name:
+            await interaction.response.send_message(
+                "❌ Could not find a matching timezone. Try a different city or full timezone like `America/New_York`.",
+                ephemeral=True
+            )
+            return
 
+        timezones[str(self.user_id)] = tz_name
+        save_timezones(timezones)
+        await interaction.response.send_message(f"✅ Timezone set to **{tz_name}**", ephemeral=True)
 
 # ---------------------------
-# Check Someone's Time
+# Timezone Button View
 # ---------------------------
+class TimezoneView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-@bot.command(name="time")
-async def time_user(ctx, member: discord.Member = None):
+    @discord.ui.button(label="Set Your Timezone", style=discord.ButtonStyle.primary, custom_id="set_timezone")
+    async def set_timezone(self, interaction: discord.Interaction, button: Button):
+        modal = TimezoneModal(interaction.user.id)
+        await interaction.response.send_modal(modal)
 
-    member = member or ctx.author
-    tz = timezones.get(str(member.id))
+    @discord.ui.button(label="Refresh Times", style=discord.ButtonStyle.secondary, custom_id="refresh_times")
+    async def refresh_times(self, interaction: discord.Interaction, button: Button):
+        embed = await build_timezone_embed(interaction.user, interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    if not tz:
-        await ctx.send(f"{member.display_name} has not set a timezone.")
-        return
-
-    local_time = datetime.now(ZoneInfo(tz))
-
+async def build_timezone_embed(viewer: discord.User, guild: discord.Guild):
     embed = discord.Embed(
-        title=f"🕒 {member.display_name}'s Time",
-        description=local_time.strftime("%A, %B %d\n%I:%M %p"),
-        color=discord.Color.blurple()
-    )
-
-    embed.set_footer(text=tz)
-
-    await ctx.send(embed=embed)
-
-
-@tree.command(name="time", description="Check someone's local time", guild=discord.Object(id=GUILD_ID))
-async def slash_time(interaction: discord.Interaction, member: discord.Member):
-
-    tz = timezones.get(str(member.id))
-
-    if not tz:
-        await interaction.response.send_message(
-            f"{member.display_name} has not set a timezone.",
-            ephemeral=True
-        )
-        return
-
-    local_time = datetime.now(ZoneInfo(tz))
-
-    embed = discord.Embed(
-        title=f"🕒 {member.display_name}'s Time",
-        description=local_time.strftime("%A, %B %d\n%I:%M %p"),
-        color=discord.Color.blurple()
-    )
-
-    embed.set_footer(text=tz)
-
-    await interaction.response.send_message(embed=embed)
-
-
-# ---------------------------
-# World Clock
-# ---------------------------
-
-@tree.command(name="worldclock", description="See everyone's local time", guild=discord.Object(id=GUILD_ID))
-async def worldclock(interaction: discord.Interaction):
-
-    embed = discord.Embed(
-        title="🌍 Server World Clock",
+        title=f"🌍 Server Times (Last viewed: {datetime.now().astimezone().strftime('%Y-%m-%d %I:%M %p')})",
         color=discord.Color.green()
     )
 
-    guild = interaction.guild
-
     if not timezones:
         embed.description = "No timezones set yet."
-        await interaction.response.send_message(embed=embed)
-        return
-
-    for user_id, tz_name in timezones.items():
-
-        member = guild.get_member(int(user_id))
-        if not member:
-            continue
-
-        local_time = datetime.now(ZoneInfo(tz_name))
-
-        embed.add_field(
-            name=member.display_name,
-            value=f"{local_time.strftime('%A %I:%M %p')}\n`{tz_name}`",
-            inline=True
-        )
-
-    await interaction.response.send_message(embed=embed)
+    else:
+        for user_id, tz_name in timezones.items():
+            member = guild.get_member(int(user_id))
+            if member:
+                try:
+                    local_time = datetime.now(ZoneInfo(tz_name))
+                    display_time = local_time.strftime("%A, %I:%M %p")
+                except:
+                    display_time = "Invalid TZ"
+                embed.add_field(name=member.display_name, value=f"{display_time}\n`{tz_name}`", inline=True)
+    return embed
 
 # ---------------------------
-# Commands
+# Prefix Commands
 # ---------------------------
+@bot.command(name="time")
+async def prefix_time(ctx):
+    embed = await build_timezone_embed(ctx.author, ctx.guild)
+    view = TimezoneView()
+    await ctx.send(embed=embed, view=view)
+
 @bot.command(name="word")
 async def prefix_word(ctx):
     view = WordView()
     await view.generate()
     await ctx.send(embed=view.pages[0], view=view)
-
-@tree.command(name="word", description="Discover a random word")
-async def slash_word(interaction: discord.Interaction):
-    view = WordView()
-    await view.generate()
-    await interaction.response.send_message(embed=view.pages[0], view=view)
 
 @bot.command(name="weird")
 async def prefix_weird(ctx):
@@ -558,26 +477,11 @@ async def prefix_weird(ctx):
     view = WeirdLawView(laws_list)
     await ctx.send(embed=view.create_embed(), view=view)
 
-@tree.command(name="weird", description="Random weird law", guild=discord.Object(id=GUILD_ID))
-async def slash_weird(interaction: discord.Interaction):
-    laws_list = list(WEIRD_LAWS.values())
-    if not laws_list:
-        await interaction.response.send_message("Weird laws database is empty.", ephemeral=True)
-        return
-    view = WeirdLawView(laws_list)
-    await interaction.response.send_message(embed=view.create_embed(), view=view)
-
 @bot.command(name="quote")
 async def prefix_quote(ctx):
     view = ZenQuoteView()
     await view.fetch_new_quote()
     await ctx.send(embed=view.create_embed(), view=view)
-
-@tree.command(name="quote", description="Random inspirational quote", guild=discord.Object(id=GUILD_ID))
-async def slash_quote(interaction: discord.Interaction):
-    view = ZenQuoteView()
-    await view.fetch_new_quote()
-    await interaction.response.send_message(embed=view.create_embed(), view=view)
 
 @bot.command(name="sl")
 async def songlink_prefix(ctx, *, query: str):
@@ -588,6 +492,43 @@ async def songlink_prefix(ctx, *, query: str):
         await ctx.send("Could not find links for that song.")
         return
     await send_songlink_embed(ctx, song_data, is_slash=False)
+
+@bot.command(name="ecm")
+async def ecm(ctx):
+    embed = discord.Embed(
+        title="📜 Commands List (Prefix Only)",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="!word", value="Discover a random word", inline=False)
+    embed.add_field(name="!weird", value="Get a random weird law", inline=False)
+    embed.add_field(name="!quote", value="Random inspirational quote", inline=False)
+    embed.add_field(name="!sl [link]", value="Get song links from Spotify, Apple, or YouTube", inline=False)
+    embed.add_field(name="!time", value="Interactive server time embed with timezone buttons", inline=False)
+    await ctx.send(embed=embed)
+
+# ---------------------------
+# Slash Commands
+# ---------------------------
+@tree.command(name="word", description="Discover a random word")
+async def slash_word(interaction: discord.Interaction):
+    view = WordView()
+    await view.generate()
+    await interaction.response.send_message(embed=view.pages[0], view=view)
+
+@tree.command(name="weird", description="Random weird law", guild=discord.Object(id=GUILD_ID))
+async def slash_weird(interaction: discord.Interaction):
+    laws_list = list(WEIRD_LAWS.values())
+    if not laws_list:
+        await interaction.response.send_message("Weird laws database is empty.", ephemeral=True)
+        return
+    view = WeirdLawView(laws_list)
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
+
+@tree.command(name="quote", description="Random inspirational quote", guild=discord.Object(id=GUILD_ID))
+async def slash_quote(interaction: discord.Interaction):
+    view = ZenQuoteView()
+    await view.fetch_new_quote()
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
 
 @tree.command(name="sl", description="Get song links", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(query="Paste Spotify, Apple, or YouTube link")
@@ -602,29 +543,6 @@ async def songlink_slash(interaction: discord.Interaction, query: str):
         return
     await send_songlink_embed(interaction, song_data, is_slash=True)
 
-bot.command(name="tz")
-async def tz(ctx):
-    """Public embed showing all users' current times"""
-    embed = discord.Embed(
-        title="🌍 All User Times",
-        color=discord.Color.green()
-    )
-
-    if not timezones:
-        embed.description = "No timezones set yet."
-    else:
-        for user_id, tz_name in timezones.items():
-            member = ctx.guild.get_member(int(user_id))
-            if member:
-                local_time = datetime.now(ZoneInfo(tz_name))
-                embed.add_field(
-                    name=member.display_name,
-                    value=local_time.strftime("%A, %I:%M %p"),
-                    inline=False
-                )
-
-    await ctx.send(embed=embed)
-
 # ---------------------------
 # Bot Event: on_ready with persistent views
 # ---------------------------
@@ -632,12 +550,15 @@ async def tz(ctx):
 async def on_ready():
     print(f"Logged in as {bot.user}")
 
+    # Persistent Views
     if not any(isinstance(v, WordView) for v in bot.persistent_views):
         bot.add_view(WordView())
     if not any(isinstance(v, ZenQuoteView) for v in bot.persistent_views):
         bot.add_view(ZenQuoteView())
     if not any(isinstance(v, WeirdLawView) for v in bot.persistent_views):
         bot.add_view(WeirdLawView(list(WEIRD_LAWS.values())))
+    if not any(isinstance(v, TimezoneView) for v in bot.persistent_views):
+        bot.add_view(TimezoneView())
 
     await tree.sync()
     print("Commands synced.")
