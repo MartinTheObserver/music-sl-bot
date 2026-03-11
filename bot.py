@@ -443,39 +443,32 @@ class TimezoneModal(Modal):
 async def build_timezone_embed(viewer, guild):
 
     now = datetime.now().astimezone()
+    unix_ts = int(now.timestamp())
 
     embed = discord.Embed(
-        title=f"Server Times",
-        description=f"Last refreshed: {now.strftime('%Y-%m-%d %I:%M %p')}",
+        title="Server Times",
+        description=f"Last refreshed: <t:{unix_ts}:f>",
         color=discord.Color.green()
     )
 
     if not timezones:
-
         embed.description += "\n\nNo timezones saved yet."
-
         return embed
 
     for uid, tz in timezones.items():
-
         member = guild.get_member(int(uid))
-
         if not member:
             continue
 
         try:
-
             t = datetime.now(ZoneInfo(tz))
-
             display = t.strftime("%A %I:%M %p")
-
         except:
-
             display = "Invalid TZ"
 
         embed.add_field(
             name=member.display_name,
-            value=f"{display}\n",
+            value=f"{display}",  # Removed raw tz display
             inline=True
         )
 
