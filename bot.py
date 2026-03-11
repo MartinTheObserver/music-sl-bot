@@ -475,7 +475,7 @@ async def build_timezone_embed(viewer, guild):
 
         embed.add_field(
             name=member.display_name,
-            value=f"{display}\n`{tz}`",
+            value=f"{display}\n",
             inline=True
         )
 
