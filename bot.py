@@ -175,121 +175,218 @@ async def send_songlink_embed(ctx, song_data, is_slash=False):
         await ctx.send(embed=embed)
 
 # ---------------------------
-# Random Word System
+# Load Weird Laws Database
 # ---------------------------
-
-class WordView(View):
-
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.pages = []
-
-    async def generate(self):
-
-        headers = {"X-Api-Key": API_NINJA_RANDOM_WORD_KEY}
-
-        r = requests.get(
-            "https://api.api-ninjas.com/v1/randomword",
-            headers=headers
-        )
-
-        word = r.json()["word"]
-
-        embed = discord.Embed(
-            title=f"Word: {word}",
-            color=discord.Color.green()
-        )
-
-        self.pages = [embed]
-
-    @discord.ui.button(label="New Word", style=discord.ButtonStyle.primary, custom_id="word_new")
-    async def new_word(self, interaction: discord.Interaction, button: Button):
-
-        await self.generate()
-
-        await interaction.response.edit_message(
-            embed=self.pages[0],
-            view=self
-        )
-
-# ---------------------------
-# Quote System
-# ---------------------------
-
-class ZenQuoteView(View):
-
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.quote = None
-
-    async def fetch_new_quote(self):
-
-        r = requests.get("https://zenquotes.io/api/random")
-
-        data = r.json()[0]
-
-        self.quote = f'"{data["q"]}"\n— {data["a"]}'
-
-    def create_embed(self):
-
-        return discord.Embed(
-            title="Quote",
-            description=self.quote,
-            color=discord.Color.gold()
-        )
-
-    @discord.ui.button(label="New Quote", style=discord.ButtonStyle.secondary, custom_id="quote_new")
-    async def new_quote(self, interaction: discord.Interaction, button: Button):
-
-        await self.fetch_new_quote()
-
-        await interaction.response.edit_message(
-            embed=self.create_embed(),
-            view=self
-        )
-
-# ---------------------------
-# Weird Laws Loader
-# ---------------------------
-
-with open("weird_laws.json", "r", encoding="utf8") as f:
+with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
-
+# ---------------------------
+# Weird Laws Viewer
+# ---------------------------
 class WeirdLawView(View):
-
     def __init__(self, laws, index=0):
         super().__init__(timeout=None)
         self.laws = laws
         self.index = index
 
     def create_embed(self):
-
         law = self.laws[self.index]
-
-        return discord.Embed(
-            title="Weird Law",
-            description=law,
+        embed = discord.Embed(
+            title="🌍 Weird Law",
+            description=f"**{law['law']}**",
             color=discord.Color.orange()
         )
+        embed.add_field(name="Location", value=f"{law['region']}, {law['country']}", inline=False)
+        embed.add_field(name="Explanation", value=law["description"], inline=False)
+        embed.set_footer(text=f"Source: {law['source']} | #{self.index+1}/{len(self.laws)}")
+        return embed
+
+    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary, custom_id="weirdlaw_prev")
+    async def previous(self, interaction: discord.Interaction, button: Button):
+        self.index = (self.index - 1) % len(self.laws)
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="🎲 Random", style=discord.ButtonStyle.primary, custom_id="weirdlaw_random")
+    async def random_law(self, interaction: discord.Interaction, button: Button):
+        self.index = random.randint(0, len(self.laws) - 1)
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary, custom_id="weirdlaw_next")
+    async def next(self, interaction: discord.Interaction, button: Button):
+        self.index = (self.index + 1) % len(self.laws)
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 # ---------------------------
-# Weird Law Button
+# ZenQuotes Viewer
 # ---------------------------
+class ZenQuoteView(View):
+    def __init__(self, quote_text="", author=""):
+        super().__init__(timeout=None)
+        self.quote_text = quote_text
+        self.author = author
 
-    @discord.ui.button(label="Next Law", style=discord.ButtonStyle.primary, custom_id="law_next")
-    async def next_law(self, interaction: discord.Interaction, button: Button):
-
-        self.index += 1
-
-        if self.index >= len(self.laws):
-            self.index = 0
-
-        await interaction.response.edit_message(
-            embed=self.create_embed(),
-            view=self
+    def create_embed(self):
+        embed = discord.Embed(
+            title="💬 Random Quote",
+            description=f"“{self.quote_text}”\n\n— {self.author}" if self.author else f"“{self.quote_text}”",
+            color=discord.Color.green()
         )
+        return embed
 
+    async def fetch_new_quote(self):
+        try:
+            r = requests.get("https://zenquotes.io/api/random", timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0:
+                self.quote_text = data[0].get("q", "No quote found")
+                self.author = data[0].get("a", "")
+            else:
+                self.quote_text = "No quote found"
+                self.author = ""
+        except Exception as e:
+            self.quote_text = f"Error fetching quote: {e}"
+            self.author = ""
+
+    @discord.ui.button(label="🎲 New Quote", style=discord.ButtonStyle.primary, custom_id="quote_new")
+    async def new_quote(self, interaction: discord.Interaction, button: Button):
+        await self.fetch_new_quote()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+# ---------------------------
+# Fixed WordView Class
+# ---------------------------
+class WordView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.pages = []
+        self.page_types = []
+        self.index = 0
+
+    async def fetch_random_word(self):
+        url = "https://api.api-ninjas.com/v1/randomword"
+        headers = {"X-Api-Key": API_NINJA_RANDOM_WORD_KEY}
+        try:
+            r = requests.get(url, headers=headers, timeout=15)
+            r.raise_for_status()
+            word = r.json().get("word", "example")
+            if isinstance(word, list):
+                word = word[0]
+            return str(word)
+        except:
+            return "example"
+
+    async def dictionary(self, word):
+        defs, examples, pron = [], [], "N/A"
+        try:
+            r = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=10)
+            if r.status_code == 200:
+                data = r.json()[0]
+                if data.get("phonetics"):
+                    pron = data["phonetics"][0].get("text", "N/A")
+                for meaning in data.get("meanings", []):
+                    for d in meaning.get("definitions", []):
+                        defs.append(d.get("definition"))
+                        if d.get("example"):
+                            examples.append(d.get("example"))
+        except:
+            pass
+
+        if not defs:
+            try:
+                r = requests.get(f"https://api.datamuse.com/words?sp={word}&md=d&max=1", timeout=10)
+                data = r.json()
+                if data and "defs" in data[0]:
+                    defs = [d.split("\t")[1] for d in data[0]["defs"]]
+            except:
+                pass
+
+        return pron, defs[:10], examples[:8]
+
+    async def related_words(self, word):
+        try:
+            r = requests.get(f"https://api.datamuse.com/words?ml={word}&max=20", timeout=10)
+            return [x["word"] for x in r.json()]
+        except:
+            return []
+
+    async def etymology(self, word):
+        try:
+            r = requests.get(
+                f"https://en.wiktionary.org/w/api.php?action=parse&page={word}&prop=text&format=json",
+                timeout=10
+            )
+            html = r.json()["parse"]["text"]["*"]
+            matches = re.findall(r"<h[1-6][^>]*>Etymology.*?</h[1-6]>(.*?)<h[1-6]", html, re.S | re.I)
+            paragraphs = []
+            for match in matches:
+                text = re.sub("<.*?>", "", match).strip()
+                if text:
+                    paragraphs.append(text)
+            if paragraphs:
+                return "\n\n".join(paragraphs)[:900]
+        except:
+            pass
+        return "Etymology not found."
+
+    async def generate(self):
+        word = await self.fetch_random_word()
+        pron, defs, examples = await self.dictionary(word)
+        rel = await self.related_words(word)
+        ety = await self.etymology(word)
+
+        self.pages = []
+        self.page_types = []
+
+        def build_embed(embed_word, title, content):
+            embed_word_str = str(embed_word)
+            embed = discord.Embed(
+                title=embed_word_str.capitalize(),
+                url=f"https://www.google.com/search?q=define+{embed_word_str}",
+                description=f"Pronunciation: {pron}",
+                color=discord.Color.blurple()
+            )
+            if len(content) > 1024:
+                content = content[:1020] + "…"
+            embed.add_field(name=title, value=content or "N/A", inline=False)
+            return embed
+
+        if defs:
+            self.pages.append(build_embed(word, "Definitions", "\n".join(f"• {d}" for d in defs)))
+            self.page_types.append("Definitions")
+        if examples:
+            self.pages.append(build_embed(word, "Examples", "\n".join(f"• {e}" for e in examples)))
+            self.page_types.append("Examples")
+        if rel:
+            self.pages.append(build_embed(word, "Related Words", ", ".join(rel[:15])))
+            self.page_types.append("Related Words")
+        if ety:
+            self.pages.append(build_embed(word, "Etymology", ety))
+            self.page_types.append("Etymology")
+
+        self.index = 0
+        for i, embed in enumerate(self.pages):
+            next_type = self.page_types[i + 1] if i + 1 < len(self.pages) else "End"
+            embed.set_footer(text=f"Page {i+1}/{len(self.pages)} | Next: {next_type}")
+
+    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary, custom_id="word_prev")
+    async def prev(self, interaction: discord.Interaction, button: Button):
+        if not self.pages:
+            await self.generate()
+        self.index = (self.index - 1) % len(self.pages)
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="🎲 Random Word", style=discord.ButtonStyle.primary, custom_id="word_random")
+    async def new_word(self, interaction: discord.Interaction, button: Button):
+        await self.generate()
+        await interaction.response.edit_message(embed=self.pages[0], view=self)
+
+    @discord.ui.button(label="➡ Next", style=discord.ButtonStyle.secondary, custom_id="word_next")
+    async def next(self, interaction: discord.Interaction, button: Button):
+        if not self.pages:
+            await self.generate()
+        self.index = (self.index + 1) % len(self.pages)
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
 # ---------------------------
 # Timezone Modal
