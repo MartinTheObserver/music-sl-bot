@@ -6,6 +6,7 @@ import discord
 import threading
 import asyncio
 import random
+import base64
 
 from discord.ext import commands
 from discord import app_commands
