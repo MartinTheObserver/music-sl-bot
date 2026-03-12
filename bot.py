@@ -181,6 +181,65 @@ with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
 # ---------------------------
+# Load Affirmations
+# ---------------------------
+with open("affirmations.json", "r", encoding="utf-8") as f:
+    affirmations = json.load(f)
+
+# ---------------------------
+# Load Rel Progress
+# ---------------------------
+with open("rel_progress.json", "r") as f:
+    rel_progress = json.load(f)
+
+# ---------------------------
+# Rel Progress Helper
+# ---------------------------
+def save_rel_progress():
+    with open("rel_progress.json", "w") as f:
+        json.dump(rel_progress, f)
+
+# ---------------------------
+# Affirmations Viewer
+# ---------------------------
+class AffirmationView(discord.ui.View):
+    def __init__(self, affirmations, start_index):
+        super().__init__(timeout=300)
+        self.affirmations = affirmations
+        self.index = start_index
+
+    def get_embed(self):
+        embed = discord.Embed(
+            title="Much love",
+            description=self.affirmations[self.index],
+            color=discord.Color.pink()
+        )
+        embed.set_footer(text=f"{self.index+1}/{len(self.affirmations)}")
+        return embed
+
+    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if self.index > 0:
+            self.index -= 1
+
+        rel_progress["index"] = self.index
+        save_rel_progress()
+
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if self.index < len(self.affirmations) - 1:
+            self.index += 1
+
+        rel_progress["index"] = self.index
+        save_rel_progress()
+
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+# ---------------------------
 # Weird Laws Viewer
 # ---------------------------
 class WeirdLawView(View):
@@ -637,6 +696,19 @@ async def ecm(ctx):
 
     await ctx.send(embed=embed)
 
+@bot.command()
+async def rel(ctx):
+
+    start_index = rel_progress["index"]
+
+    view = AffirmationView(affirmations, start_index)
+    embed = view.get_embed()
+
+    await ctx.send(embed=embed, view=view)
+
+    # advance for next command use
+    rel_progress["index"] = (start_index + 1) % len(affirmations)
+    save_rel_progress()
 
 # ---------------------------
 # Slash Commands
