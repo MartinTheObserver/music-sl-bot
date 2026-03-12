@@ -210,9 +210,9 @@ class AffirmationView(discord.ui.View):
 
     def get_embed(self):
         embed = discord.Embed(
-            title="Much love",
+            title="For the days you need reminding",
             description=self.affirmations[self.index],
-            color=discord.Color.pink()
+            color=discord.Color.gold()
         )
         embed.set_footer(text=f"{self.index+1}/{len(self.affirmations)}")
         return embed
