@@ -694,10 +694,16 @@ async def ecm(ctx):
         inline=False
     )
 
+    embed.add_field(
+        name="!affirm",
+        value="A reminder if ever needed",
+        inline=False
+    )
+
     await ctx.send(embed=embed)
 
 @bot.command()
-async def rel(ctx):
+async def affirm(ctx):
 
     start_index = rel_progress["index"]
 
