@@ -231,7 +231,7 @@ class AffirmationView(discord.ui.View):
 # ---------------------------
 class AffirmationPrevButton(discord.ui.Button):
     def __init__(self, parent_view):
-        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.primary, custom_id="affirm_prev")
+        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.secondary, custom_id="affirm_prev")
         self.parent_view = parent_view
         self.persistent = True
 
@@ -240,20 +240,6 @@ class AffirmationPrevButton(discord.ui.Button):
         if category_indexes[current_category] < 0:
             category_indexes[current_category] = len(affirmations[current_category]) - 1
         await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
-
-
-class AffirmationNextButton(discord.ui.Button):
-    def __init__(self, parent_view):
-        super().__init__(label="Next ➡", style=discord.ButtonStyle.primary, custom_id="affirm_next")
-        self.parent_view = parent_view
-        self.persistent = True
-
-    async def callback(self, interaction: discord.Interaction):
-        category_indexes[current_category] += 1
-        if category_indexes[current_category] >= len(affirmations[current_category]):
-            category_indexes[current_category] = 0
-        await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
-
 
 class AffirmationSwitchCategoryButton(discord.ui.Button):
     def __init__(self, parent_view):
@@ -271,6 +257,17 @@ class AffirmationSwitchCategoryButton(discord.ui.Button):
         )
         await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
+class AffirmationNextButton(discord.ui.Button):
+    def __init__(self, parent_view):
+        super().__init__(label="Next ➡", style=discord.ButtonStyle.secondary, custom_id="affirm_next")
+        self.parent_view = parent_view
+        self.persistent = True
+
+    async def callback(self, interaction: discord.Interaction):
+        category_indexes[current_category] += 1
+        if category_indexes[current_category] >= len(affirmations[current_category]):
+            category_indexes[current_category] = 0
+        await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 class AffirmationCategoryButton(discord.ui.Button):
     def __init__(self, category, parent_view):
@@ -292,7 +289,7 @@ class AffirmationCategoryButton(Button):
     def __init__(self, category_name, parent_view):
         super().__init__(
             label=category_name.replace("_", " ").title(),
-            style=discord.ButtonStyle.primary
+            style=discord.ButtonStyle.success
         )
         self.category_name = category_name
         self.parent_view = parent_view
@@ -329,7 +326,7 @@ class WeirdLawView(View):
         embed.set_footer(text=f"Source: {law['source']} | #{self.index+1}/{len(self.laws)}")
         return embed
 
-    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.primary, custom_id="weirdlaw_prev")
+    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary, custom_id="weirdlaw_prev")
     async def previous(self, interaction: discord.Interaction, button: Button):
         self.index = (self.index - 1) % len(self.laws)
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
@@ -339,7 +336,7 @@ class WeirdLawView(View):
         self.index = random.randint(0, len(self.laws) - 1)
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
-    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary, custom_id="weirdlaw_next")
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary, custom_id="weirdlaw_next")
     async def next(self, interaction: discord.Interaction, button: Button):
         self.index = (self.index + 1) % len(self.laws)
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
@@ -497,7 +494,7 @@ class WordView(View):
             next_type = self.page_types[i + 1] if i + 1 < len(self.pages) else "End"
             embed.set_footer(text=f"Page {i+1}/{len(self.pages)} | Next: {next_type}")
 
-    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.primary, custom_id="word_prev")
+    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary, custom_id="word_prev")
     async def prev(self, interaction: discord.Interaction, button: Button):
         if not self.pages:
             await self.generate()
@@ -509,7 +506,7 @@ class WordView(View):
         await self.generate()
         await interaction.response.edit_message(embed=self.pages[0], view=self)
 
-    @discord.ui.button(label="➡ Next", style=discord.ButtonStyle.primary, custom_id="word_next")
+    @discord.ui.button(label="➡ Next", style=discord.ButtonStyle.secondary, custom_id="word_next")
     async def next(self, interaction: discord.Interaction, button: Button):
         if not self.pages:
             await self.generate()
@@ -625,7 +622,7 @@ class TimezoneView(View):
 
     @discord.ui.button(
         label="Refresh Times",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="timezone_refresh"
     )
     async def refresh(self, interaction: discord.Interaction, button: Button):
