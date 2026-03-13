@@ -770,8 +770,13 @@ async def prefix_affirm(ctx, category: str = None):
         selected_category = None
 
     view = AffirmationView(category=selected_category)
-    embed = view.get_content()  # or get_embed() if you have an embed method
-    await ctx.send(embed=embed, view=view)
+content = view.get_content()
+embed = discord.Embed(
+    title="Words You May Need Reminded Of",
+    description=content,
+    color=discord.Color.blurple()
+)
+await ctx.send(embed=embed, view=view)
     
 # ---------------------------
 # Slash Commands
