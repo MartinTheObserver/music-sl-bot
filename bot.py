@@ -180,29 +180,51 @@ async def send_songlink_embed(ctx, song_data, is_slash=False):
 with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
-# ---------------------------
-# Load Affirmations by Category
-# ---------------------------
+#----------------------------
+# Load Affirmations Database
+#----------------------------
 with open("affirmations.json", "r", encoding="utf-8") as f:
     affirmations = json.load(f)
 
-# Flatten category list for convenience (optional)
 CATEGORIES = list(affirmations.keys())
+category_indexes = {cat: 0 for cat in affirmations.keys()}
+current_category = "general"
 
 # ---------------------------
-# Affirmations Viewer with Categories
+# Affirmations Viewer with Categories (Rowed Buttons)
 # ---------------------------
 
-# Track current index per category
 category_indexes = {cat: 0 for cat in affirmations.keys()}
 current_category = "general"  # default starting category
 
-class AffirmationView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)  # persistent buttons
+class AffirmationView(View):
+    def __init__(self, category=None):
+        super().__init__(timeout=None)
+
+        global current_category
+        if category and category in affirmations:
+            current_category = category
+
+        # Main navigation buttons (row 0)
+        self.prev_button = AffirmationPrevButton(self)
+        self.switch_category_button = AffirmationSwitchCategoryButton(self)
+        self.next_button = AffirmationNextButton(self)
+
+        self.prev_button.row = 0
+        self.switch_category_button.row = 0
+        self.next_button.row = 0
+
+        self.add_item(self.prev_button)
+        self.add_item(self.switch_category_button)
+        self.add_item(self.next_button)
+
+        # Category buttons (row 1)
+        for cat in affirmations.keys():
+            btn = AffirmationCategoryButton(cat, self)
+            btn.row = 1
+            self.add_item(btn)
 
     def get_content(self):
-        """Return formatted text for current category/index"""
         index = category_indexes[current_category]
         text = affirmations[current_category][index]
         if " - " in text:
@@ -210,43 +232,73 @@ class AffirmationView(discord.ui.View):
             return f"**Category:** {current_category}\n\n{quote}\n*– {author}*"
         return f"**Category:** {current_category}\n\n{text}"
 
-    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
-    async def prev_button(self, interaction: discord.Interaction, button: Button):
+
+# ---------------------------
+# Main Navigation Buttons
+# ---------------------------
+class AffirmationPrevButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
         category_indexes[current_category] -= 1
         if category_indexes[current_category] < 0:
             category_indexes[current_category] = len(affirmations[current_category]) - 1
-        await interaction.response.edit_message(content=self.get_content(), view=self)
+        await interaction.response.edit_message(content=self.parent_view.get_content(), view=self.parent_view)
 
-    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
-    async def next_button(self, interaction: discord.Interaction, button: Button):
+
+class AffirmationNextButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(label="Next ➡", style=discord.ButtonStyle.primary)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
         category_indexes[current_category] += 1
         if category_indexes[current_category] >= len(affirmations[current_category]):
             category_indexes[current_category] = 0
-        await interaction.response.edit_message(content=self.get_content(), view=self)
+        await interaction.response.edit_message(content=self.parent_view.get_content(), view=self.parent_view)
 
-    @discord.ui.button(label="Switch Category", style=discord.ButtonStyle.secondary)
-    async def switch_category(self, interaction: discord.Interaction, button: Button):
+
+class AffirmationSwitchCategoryButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(label="Switch Category", style=discord.ButtonStyle.secondary)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
         global current_category
         categories = list(affirmations.keys())
         current_idx = categories.index(current_category)
         current_category = categories[(current_idx + 1) % len(categories)]
-        await interaction.response.edit_message(content=self.get_content(), view=self)
+        category_indexes[current_category] = random.randint(
+            0, len(affirmations[current_category]) - 1
+        )
+        await interaction.response.edit_message(content=self.parent_view.get_content(), view=self.parent_view)
+
 
 # ---------------------------
-# Affirmation Categories
+# Individual Category Buttons
 # ---------------------------
-class AffirmationCategoryButton(discord.ui.Button):
+class AffirmationCategoryButton(Button):
     def __init__(self, category_name, parent_view):
-        super().__init__(label=category_name.replace("_"," ").title(), style=discord.ButtonStyle.secondary)
+        super().__init__(
+            label=category_name.replace("_", " ").title(),
+            style=discord.ButtonStyle.secondary
+        )
         self.category_name = category_name
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        self.parent_view.category = self.category_name
-        self.parent_view.affirmations = affirmations_by_category.get(self.category_name, [])
-        self.parent_view.index = 0
-        await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
-
+        global current_category
+        current_category = self.category_name
+        category_indexes[current_category] = random.randint(
+            0, len(affirmations[current_category]) - 1
+        )
+        await interaction.response.edit_message(
+            content=self.parent_view.get_content(),
+            view=self.parent_view
+        )
+        
 # ---------------------------
 # Weird Laws Viewer
 # ---------------------------
@@ -665,7 +717,7 @@ async def prefix_songlink(ctx, *, query: str):
 
 
 @bot.command(name="ecm")
-async def ecm(ctx):
+async def prefix_ecm(ctx):
 
     embed = discord.Embed(
         title="Commands",
@@ -711,16 +763,14 @@ async def ecm(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def affirm(ctx, category: str = None):
-    # If category provided and valid, use it; else default
+async def prefix_affirm(ctx, category: str = None):
     if category and category.lower().replace(" ", "_") in CATEGORIES:
         selected_category = category.lower().replace(" ", "_")
     else:
         selected_category = None
 
     view = AffirmationView(category=selected_category)
-    embed = view.get_embed()
-
+    embed = view.get_content()  # or get_embed() if you have an embed method
     await ctx.send(embed=embed, view=view)
     
 # ---------------------------
