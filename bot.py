@@ -762,7 +762,7 @@ async def prefix_ecm(ctx):
 
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(name="affirm")
 async def prefix_affirm(ctx, category: str = None):
     if category and category.lower().replace(" ", "_") in CATEGORIES:
         selected_category = category.lower().replace(" ", "_")
