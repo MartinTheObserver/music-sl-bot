@@ -227,59 +227,13 @@ class AffirmationView(discord.ui.View):
         return embed
 
 # ---------------------------
-# Navigation Buttons
+# Persistent Navigation Buttons
 # ---------------------------
 class AffirmationPrevButton(discord.ui.Button):
-    def __init__(self, view):
-        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.secondary)
-        self.view = view
-
-    async def callback(self, interaction: discord.Interaction):
-        category_indexes[current_category] = (category_indexes[current_category] - 1) % len(affirmations[current_category])
-        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
-
-class AffirmationNextButton(discord.ui.Button):
-    def __init__(self, view):
-        super().__init__(label="Next ➡", style=discord.ButtonStyle.primary)
-        self.view = view
-
-    async def callback(self, interaction: discord.Interaction):
-        category_indexes[current_category] = (category_indexes[current_category] + 1) % len(affirmations[current_category])
-        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
-
-class AffirmationSwitchCategoryButton(discord.ui.Button):
-    def __init__(self, view):
-        super().__init__(label="Switch Category", style=discord.ButtonStyle.secondary)
-        self.view = view
-
-    async def callback(self, interaction: discord.Interaction):
-        global current_category
-        cats = list(affirmations.keys())
-        idx = cats.index(current_category)
-        current_category = cats[(idx + 1) % len(cats)]
-        category_indexes[current_category] = random.randint(0, len(affirmations[current_category]) - 1)
-        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
-
-class AffirmationCategoryButton(discord.ui.Button):
-    def __init__(self, category, view):
-        super().__init__(label=category.replace("_"," ").title(), style=discord.ButtonStyle.secondary)
-        self.category = category
-        self.view = view
-
-    async def callback(self, interaction: discord.Interaction):
-        global current_category
-        current_category = self.category
-        category_indexes[current_category] = random.randint(0, len(affirmations[current_category]) - 1)
-        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
-
-
-# ---------------------------
-# Main Navigation Buttons
-# ---------------------------
-class AffirmationPrevButton(Button):
     def __init__(self, parent_view):
-        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.secondary, custom_id="affirm_prev")
         self.parent_view = parent_view
+        self.persistent = True
 
     async def callback(self, interaction: discord.Interaction):
         category_indexes[current_category] -= 1
@@ -288,10 +242,11 @@ class AffirmationPrevButton(Button):
         await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 
-class AffirmationNextButton(Button):
+class AffirmationNextButton(discord.ui.Button):
     def __init__(self, parent_view):
-        super().__init__(label="Next ➡", style=discord.ButtonStyle.primary)
+        super().__init__(label="Next ➡", style=discord.ButtonStyle.primary, custom_id="affirm_next")
         self.parent_view = parent_view
+        self.persistent = True
 
     async def callback(self, interaction: discord.Interaction):
         category_indexes[current_category] += 1
@@ -300,10 +255,11 @@ class AffirmationNextButton(Button):
         await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 
-class AffirmationSwitchCategoryButton(Button):
+class AffirmationSwitchCategoryButton(discord.ui.Button):
     def __init__(self, parent_view):
-        super().__init__(label="Switch Category", style=discord.ButtonStyle.secondary)
+        super().__init__(label="Switch Category", style=discord.ButtonStyle.secondary, custom_id="affirm_switch")
         self.parent_view = parent_view
+        self.persistent = True
 
     async def callback(self, interaction: discord.Interaction):
         global current_category
@@ -315,6 +271,19 @@ class AffirmationSwitchCategoryButton(Button):
         )
         await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
+
+class AffirmationCategoryButton(discord.ui.Button):
+    def __init__(self, category, parent_view):
+        super().__init__(label=category.replace("_", " ").title(), style=discord.ButtonStyle.secondary, custom_id=f"affirm_cat_{category}")
+        self.category = category
+        self.parent_view = parent_view
+        self.persistent = True
+
+    async def callback(self, interaction: discord.Interaction):
+        global current_category
+        current_category = self.category
+        category_indexes[current_category] = random.randint(0, len(affirmations[current_category]) - 1)
+        await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 # ---------------------------
 # Individual Category Buttons
