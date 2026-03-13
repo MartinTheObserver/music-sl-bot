@@ -184,10 +184,10 @@ with open("weird_laws.json", "r", encoding="utf-8") as f:
 # Load Affirmations by Category
 # ---------------------------
 with open("affirmations.json", "r", encoding="utf-8") as f:
-    affirmations_by_category = json.load(f)
+    affirmations = json.load(f)
 
 # Flatten category list for convenience (optional)
-CATEGORIES = list(affirmations_by_category.keys())
+CATEGORIES = list(affirmations.keys())
 
 # ---------------------------
 # Affirmations Viewer with Categories
