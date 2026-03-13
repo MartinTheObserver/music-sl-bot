@@ -762,7 +762,7 @@ async def prefix_ecm(ctx):
 
     await ctx.send(embed=embed)
 
-@bot.command(name="affirm")
+@bot.command()
 async def prefix_affirm(ctx, category: str = None):
     if category and category.lower().replace(" ", "_") in CATEGORIES:
         selected_category = category.lower().replace(" ", "_")
@@ -770,13 +770,14 @@ async def prefix_affirm(ctx, category: str = None):
         selected_category = None
 
     view = AffirmationView(category=selected_category)
-content = view.get_content()
-embed = discord.Embed(
-    title="Words You May Need Reminded Of",
-    description=content,
-    color=discord.Color.blurple()
-)
-await ctx.send(embed=embed, view=view)
+    content = view.get_content()
+    embed = discord.Embed(
+        title="💡 Affirmation",
+        description=content,
+        color=discord.Color.blurple()
+    )
+
+    await ctx.send(embed=embed, view=view)
     
 # ---------------------------
 # Slash Commands
