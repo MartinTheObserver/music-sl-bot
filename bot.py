@@ -188,14 +188,14 @@ with open("affirmations.json", "r", encoding="utf-8") as f:
 
 CATEGORIES = list(affirmations.keys())
 category_indexes = {cat: 0 for cat in affirmations.keys()}
-current_category = "general"
+current_category = "self_love"
 
 # ---------------------------
 # Affirmations Viewer with Categories (Rowed Buttons)
 # ---------------------------
 
 category_indexes = {cat: 0 for cat in affirmations.keys()}
-current_category = "general"  # default starting category
+current_category = "self_love"  # default starting category
 
 class AffirmationView(View):
     def __init__(self, category=None):
