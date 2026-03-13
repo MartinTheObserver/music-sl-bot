@@ -297,7 +297,7 @@ class AffirmationNextButton(Button):
         category_indexes[current_category] += 1
         if category_indexes[current_category] >= len(affirmations[current_category]):
             category_indexes[current_category] = 0
-        await interaction.response.edit_message(content=self.parent_view.get_imbed(), view=self.parent_view)
+        await interaction.response.edit_message(content=self.parent_view.get_embed(), view=self.parent_view)
 
 
 class AffirmationSwitchCategoryButton(Button):
@@ -313,7 +313,7 @@ class AffirmationSwitchCategoryButton(Button):
         category_indexes[current_category] = random.randint(
             0, len(affirmations[current_category]) - 1
         )
-        await interaction.response.edit_message(content=self.parent_view.get_imbed(), view=self.parent_view)
+        await interaction.response.edit_message(content=self.parent_view.get_embed(), view=self.parent_view)
 
 
 # ---------------------------
@@ -335,7 +335,7 @@ class AffirmationCategoryButton(Button):
             0, len(affirmations[current_category]) - 1
         )
         await interaction.response.edit_message(
-            content=self.parent_view.get_imbed(),
+            content=self.parent_view.get_embed(),
             view=self.parent_view
         )
         
