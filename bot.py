@@ -281,29 +281,6 @@ class AffirmationCategoryButton(discord.ui.Button):
         current_category = self.category
         category_indexes[current_category] = random.randint(0, len(affirmations[current_category]) - 1)
         await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
-
-# ---------------------------
-# Individual Category Buttons
-# ---------------------------
-class AffirmationCategoryButton(Button):
-    def __init__(self, category_name, parent_view):
-        super().__init__(
-            label=category_name.replace("_", " ").title(),
-            style=discord.ButtonStyle.success
-        )
-        self.category_name = category_name
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: discord.Interaction):
-        global current_category
-        current_category = self.category_name
-        category_indexes[current_category] = random.randint(
-            0, len(affirmations[current_category]) - 1
-        )
-        await interaction.response.edit_message(
-            embed=self.parent_view.get_embed(),
-            view=self.parent_view
-        )
         
 # ---------------------------
 # Weird Laws Viewer
@@ -885,6 +862,7 @@ async def on_ready():
     bot.add_view(WordView())
     bot.add_view(ZenQuoteView())
     bot.add_view(WeirdLawView(list(WEIRD_LAWS.values())))
+    bot.add_view(AffirmationView())
 
     await tree.sync()
 
