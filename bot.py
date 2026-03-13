@@ -180,57 +180,97 @@ async def send_songlink_embed(ctx, song_data, is_slash=False):
 with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
-#----------------------------
-# Load Affirmations Database
-#----------------------------
+# ---------------------------
+# Load Affirmations
+# ---------------------------
 with open("affirmations.json", "r", encoding="utf-8") as f:
     affirmations = json.load(f)
 
 CATEGORIES = list(affirmations.keys())
 category_indexes = {cat: 0 for cat in affirmations.keys()}
-current_category = "self_love"
+current_category = random.choice(CATEGORIES)  # start with random category
 
 # ---------------------------
-# Affirmations Viewer with Categories (Rowed Buttons)
+# Affirmation View with Embed
 # ---------------------------
-
-category_indexes = {cat: 0 for cat in affirmations.keys()}
-current_category = "self_love"  # default starting category
-
-class AffirmationView(View):
+class AffirmationView(discord.ui.View):
     def __init__(self, category=None):
         super().__init__(timeout=None)
-
         global current_category
         if category and category in affirmations:
             current_category = category
-
-        # Main navigation buttons (row 0)
-        self.prev_button = AffirmationPrevButton(self)
-        self.switch_category_button = AffirmationSwitchCategoryButton(self)
-        self.next_button = AffirmationNextButton(self)
-
-        self.prev_button.row = 0
-        self.switch_category_button.row = 0
-        self.next_button.row = 0
-
-        self.add_item(self.prev_button)
-        self.add_item(self.switch_category_button)
-        self.add_item(self.next_button)
-
-        # Category buttons (row 1)
+        # Add main nav buttons (row 0)
+        self.add_item(AffirmationPrevButton(self))
+        self.add_item(AffirmationSwitchCategoryButton(self))
+        self.add_item(AffirmationNextButton(self))
+        # Add category buttons (row 1)
         for cat in affirmations.keys():
             btn = AffirmationCategoryButton(cat, self)
             btn.row = 1
             self.add_item(btn)
 
-    def get_content(self):
+    def get_embed(self):
+        """Return a Discord Embed for the current category/index"""
         index = category_indexes[current_category]
         text = affirmations[current_category][index]
         if " - " in text:
             quote, author = text.rsplit(" - ", 1)
-            return f"**Category:** {current_category}\n\n{quote}\n*– {author}*"
-        return f"**Category:** {current_category}\n\n{text}"
+            description = f"{quote}\n*– {author}*"
+        else:
+            description = text
+        embed = discord.Embed(
+            title=f"Hey Friend, You're Loved. Category: — {current_category.replace('_', ' ').title()}",
+            description=description,
+            color=discord.Color.gold()
+        )
+        embed.set_footer(text=f"{index+1}/{len(affirmations[current_category])}")
+        return embed
+
+# ---------------------------
+# Navigation Buttons
+# ---------------------------
+class AffirmationPrevButton(discord.ui.Button):
+    def __init__(self, view):
+        super().__init__(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+        self.view = view
+
+    async def callback(self, interaction: discord.Interaction):
+        category_indexes[current_category] = (category_indexes[current_category] - 1) % len(affirmations[current_category])
+        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
+
+class AffirmationNextButton(discord.ui.Button):
+    def __init__(self, view):
+        super().__init__(label="Next ➡", style=discord.ButtonStyle.primary)
+        self.view = view
+
+    async def callback(self, interaction: discord.Interaction):
+        category_indexes[current_category] = (category_indexes[current_category] + 1) % len(affirmations[current_category])
+        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
+
+class AffirmationSwitchCategoryButton(discord.ui.Button):
+    def __init__(self, view):
+        super().__init__(label="Switch Category", style=discord.ButtonStyle.secondary)
+        self.view = view
+
+    async def callback(self, interaction: discord.Interaction):
+        global current_category
+        cats = list(affirmations.keys())
+        idx = cats.index(current_category)
+        current_category = cats[(idx + 1) % len(cats)]
+        category_indexes[current_category] = random.randint(0, len(affirmations[current_category]) - 1)
+        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
+
+class AffirmationCategoryButton(discord.ui.Button):
+    def __init__(self, category, view):
+        super().__init__(label=category.replace("_"," ").title(), style=discord.ButtonStyle.secondary)
+        self.category = category
+        self.view = view
+
+    async def callback(self, interaction: discord.Interaction):
+        global current_category
+        current_category = self.category
+        category_indexes[current_category] = random.randint(0, len(affirmations[current_category]) - 1)
+        await interaction.response.edit_message(embed=self.view.get_embed(), view=self.view)
 
 
 # ---------------------------
@@ -764,20 +804,9 @@ async def prefix_ecm(ctx):
 
 @bot.command(name="affirm")
 async def prefix_affirm(ctx, category: str = None):
-    if category and category.lower().replace(" ", "_") in CATEGORIES:
-        selected_category = category.lower().replace(" ", "_")
-    else:
-        selected_category = None
-
-    view = AffirmationView(category=selected_category)
-    content = view.get_content()
-    embed = discord.Embed(
-        title="💡 Affirmation",
-        description=content,
-        color=discord.Color.blurple()
-    )
-
-    await ctx.send(embed=embed, view=view)
+    selected = category.lower().replace(" ", "_") if category and category.lower().replace(" ", "_") in CATEGORIES else None
+    view = AffirmationView(category=selected)
+    await ctx.send(embed=view.get_embed(), view=view)
     
 # ---------------------------
 # Slash Commands
