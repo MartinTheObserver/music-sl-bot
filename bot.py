@@ -219,7 +219,7 @@ class AffirmationView(discord.ui.View):
         else:
             description = text
         embed = discord.Embed(
-            title=f"Hey Friend, You're Loved. Category: — {current_category.replace('_', ' ').title()}",
+            title=f"💛 A Little Reminder | Category: — {current_category.replace('_', ' ').title()}",
             description=description,
             color=discord.Color.gold()
         )
@@ -285,7 +285,7 @@ class AffirmationPrevButton(Button):
         category_indexes[current_category] -= 1
         if category_indexes[current_category] < 0:
             category_indexes[current_category] = len(affirmations[current_category]) - 1
-        await interaction.response.edit_message(content=self.parent_view.get_content(), view=self.parent_view)
+        await interaction.response.edit_message(content=self.parent_view.get_embed(), view=self.parent_view)
 
 
 class AffirmationNextButton(Button):
