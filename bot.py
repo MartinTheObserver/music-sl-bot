@@ -271,7 +271,7 @@ class AffirmationNextButton(discord.ui.Button):
 
 class AffirmationCategoryButton(discord.ui.Button):
     def __init__(self, category, parent_view):
-        super().__init__(label=category.replace("_", " ").title(), style=discord.ButtonStyle.primary, custom_id=f"affirm_cat_{category}")
+        super().__init__(label=category.replace("_", " ").title(), style=discord.ButtonStyle.success, custom_id=f"affirm_cat_{category}")
         self.category = category
         self.parent_view = parent_view
         self.persistent = True
