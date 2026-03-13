@@ -181,63 +181,71 @@ with open("weird_laws.json", "r", encoding="utf-8") as f:
     WEIRD_LAWS = json.load(f)
 
 # ---------------------------
-# Load Affirmations
+# Load Affirmations by Category
 # ---------------------------
 with open("affirmations.json", "r", encoding="utf-8") as f:
-    affirmations = json.load(f)
+    affirmations_by_category = json.load(f)
+
+# Flatten category list for convenience (optional)
+CATEGORIES = list(affirmations_by_category.keys())
 
 # ---------------------------
-# Load Rel Progress
+# Affirmations Viewer with Categories
 # ---------------------------
-with open("rel_progress.json", "r") as f:
-    rel_progress = json.load(f)
 
-# ---------------------------
-# Rel Progress Helper
-# ---------------------------
-def save_rel_progress():
-    with open("rel_progress.json", "w") as f:
-        json.dump(rel_progress, f)
+# Track current index per category
+category_indexes = {cat: 0 for cat in affirmations.keys()}
+current_category = "general"  # default starting category
 
-# ---------------------------
-# Affirmations Viewer
-# ---------------------------
 class AffirmationView(discord.ui.View):
-    def __init__(self, affirmations, start_index):
-        super().__init__(timeout=300)
-        self.affirmations = affirmations
-        self.index = start_index
+    def __init__(self):
+        super().__init__(timeout=None)  # persistent buttons
 
-    def get_embed(self):
-        embed = discord.Embed(
-            title="For the days you need reminding",
-            description=self.affirmations[self.index],
-            color=discord.Color.gold()
-        )
-        embed.set_footer(text=f"{self.index+1}/{len(self.affirmations)}")
-        return embed
+    def get_content(self):
+        """Return formatted text for current category/index"""
+        index = category_indexes[current_category]
+        text = affirmations[current_category][index]
+        if " - " in text:
+            quote, author = text.rsplit(" - ", 1)
+            return f"**Category:** {current_category}\n\n{quote}\n*– {author}*"
+        return f"**Category:** {current_category}\n\n{text}"
 
     @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
-    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        if self.index > 0:
-            self.index -= 1
-
-        rel_progress["index"] = self.index
-        save_rel_progress()
-
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    async def prev_button(self, interaction: discord.Interaction, button: Button):
+        category_indexes[current_category] -= 1
+        if category_indexes[current_category] < 0:
+            category_indexes[current_category] = len(affirmations[current_category]) - 1
+        await interaction.response.edit_message(content=self.get_content(), view=self)
 
     @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
-    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next_button(self, interaction: discord.Interaction, button: Button):
+        category_indexes[current_category] += 1
+        if category_indexes[current_category] >= len(affirmations[current_category]):
+            category_indexes[current_category] = 0
+        await interaction.response.edit_message(content=self.get_content(), view=self)
 
-        if self.index < len(self.affirmations) - 1:
-            self.index += 1
+    @discord.ui.button(label="Switch Category", style=discord.ButtonStyle.secondary)
+    async def switch_category(self, interaction: discord.Interaction, button: Button):
+        global current_category
+        categories = list(affirmations.keys())
+        current_idx = categories.index(current_category)
+        current_category = categories[(current_idx + 1) % len(categories)]
+        await interaction.response.edit_message(content=self.get_content(), view=self)
 
-        rel_progress["index"] = self.index
-        save_rel_progress()
+# ---------------------------
+# Affirmation Categories
+# ---------------------------
+class AffirmationCategoryButton(discord.ui.Button):
+    def __init__(self, category_name, parent_view):
+        super().__init__(label=category_name.replace("_"," ").title(), style=discord.ButtonStyle.secondary)
+        self.category_name = category_name
+        self.parent_view = parent_view
 
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.category = self.category_name
+        self.parent_view.affirmations = affirmations_by_category.get(self.category_name, [])
+        self.parent_view.index = 0
+        await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 # ---------------------------
 # Weird Laws Viewer
@@ -703,19 +711,18 @@ async def ecm(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def affirm(ctx):
+async def affirm(ctx, category: str = None):
+    # If category provided and valid, use it; else default
+    if category and category.lower().replace(" ", "_") in CATEGORIES:
+        selected_category = category.lower().replace(" ", "_")
+    else:
+        selected_category = None
 
-    start_index = rel_progress["index"]
-
-    view = AffirmationView(affirmations, start_index)
+    view = AffirmationView(category=selected_category)
     embed = view.get_embed()
 
     await ctx.send(embed=embed, view=view)
-
-    # advance for next command use
-    rel_progress["index"] = (start_index + 1) % len(affirmations)
-    save_rel_progress()
-
+    
 # ---------------------------
 # Slash Commands
 # ---------------------------
