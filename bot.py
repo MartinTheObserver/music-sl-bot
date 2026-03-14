@@ -446,7 +446,7 @@ class WordView(View):
                 title=embed_word_str.capitalize(),
                 url=f"https://www.google.com/search?q=define+{embed_word_str}",
                 description=f"Pronunciation: {pron}",
-                color=discord.Color.light_blue()
+                color=discord.Color.blue()
             )
             if len(content) > 1024:
                 content = content[:1020] + "…"
