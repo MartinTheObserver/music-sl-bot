@@ -158,7 +158,7 @@ async def send_songlink_embed(ctx, song_data, is_slash=False):
 
     embed = discord.Embed(
         title="Song Links",
-        color=discord.Color.blurple()
+        color=discord.Color.green()
     )
 
     for platform, url in song_data["links"].items():
@@ -296,7 +296,7 @@ class WeirdLawView(View):
         embed = discord.Embed(
             title="🌍 Weird Law",
             description=f"**{law['law']}**",
-            color=discord.Color.orange()
+            color=discord.Color.dark_orange()
         )
         embed.add_field(name="Location", value=f"{law['region']}, {law['country']}", inline=False)
         embed.add_field(name="Explanation", value=law["description"], inline=False)
@@ -331,7 +331,7 @@ class ZenQuoteView(View):
         embed = discord.Embed(
             title="💬 Random Quote",
             description=f"“{self.quote_text}”\n\n— {self.author}" if self.author else f"“{self.quote_text}”",
-            color=discord.Color.green()
+            color=discord.Color.dark_grey()
         )
         return embed
 
@@ -446,7 +446,7 @@ class WordView(View):
                 title=embed_word_str.capitalize(),
                 url=f"https://www.google.com/search?q=define+{embed_word_str}",
                 description=f"Pronunciation: {pron}",
-                color=discord.Color.blurple()
+                color=discord.Color.light_blue()
             )
             if len(content) > 1024:
                 content = content[:1020] + "…"
@@ -550,7 +550,7 @@ async def build_timezone_embed(viewer, guild):
     embed = discord.Embed(
         title="Server Times",
         description=f"Last refreshed: <t:{unix_ts}:f>",
-        color=discord.Color.green()
+        color=discord.Color.dark_purple()
     )
 
     if not timezones:
@@ -704,7 +704,7 @@ async def prefix_ecm(ctx):
 
     embed = discord.Embed(
         title="Commands",
-        color=discord.Color.blurple()
+        color=discord.Color.red()
     )
 
     embed.add_field(
