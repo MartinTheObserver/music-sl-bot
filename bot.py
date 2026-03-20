@@ -174,6 +174,68 @@ async def send_songlink_embed(ctx, song_data, is_slash=False):
     else:
         await ctx.send(embed=embed)
 
+async def send_lyrics_embed(ctx, data, is_slash=False):
+
+    embed = discord.Embed(
+        title=data["title"],
+        description=data["lyrics"],
+        color=discord.Color.success()
+    )
+
+    if is_slash:
+        await ctx.followup.send(embed=embed)
+    else:
+        await ctx.send(embed=embed)
+
+# ---------------------------
+# Genius Lyrics Fetch
+# ---------------------------
+
+async def fetch_lyrics(query: str):
+    try:
+        headers = {
+            "Authorization": f"Bearer {GENIUS_API_KEY}"
+        }
+
+        search_url = "https://api.genius.com/search"
+        params = {"q": query}
+
+        r = requests.get(search_url, headers=headers, params=params, timeout=10)
+
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        hits = data["response"]["hits"]
+
+        if not hits:
+            return None
+
+        song_url = hits[0]["result"]["url"]
+
+        # Scrape lyrics page
+        page = requests.get(song_url, timeout=10)
+        html = page.text
+
+        # Basic lyrics extraction (Genius embeds)
+        lyrics = re.findall(r'<div data-lyrics-container="true".*?>(.*?)</div>', html, re.S)
+
+        clean = []
+        for block in lyrics:
+            text = re.sub("<.*?>", "", block)
+            clean.append(text.strip())
+
+        final = "\n".join(clean).strip()
+
+        return {
+            "title": hits[0]["result"]["full_title"],
+            "lyrics": final[:4000] if final else "Lyrics not found."
+        }
+
+    except Exception as e:
+        print(e)
+        return None
+
 # ---------------------------
 # Load Weird Laws Database
 # ---------------------------
@@ -682,21 +744,19 @@ async def prefix_songlink(ctx, *, query: str):
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
         return
 
-    data = await fetch_song_links(
-        query,
-        ctx,
-        is_slash=False
-    )
+    # Fetch both
+    song_data = await fetch_song_links(query, ctx)
+    lyrics_data = await fetch_lyrics(query)
 
-    if not data:
-        await ctx.send("Could not find links.")
+    if not song_data and not lyrics_data:
+        await ctx.send("Nothing found.")
         return
 
-    await send_songlink_embed(
-        ctx,
-        data,
-        is_slash=False
-    )
+    if song_data:
+        await send_songlink_embed(ctx, song_data)
+
+    if lyrics_data:
+        await send_lyrics_embed(ctx, lyrics_data)
 
 
 @bot.command(name="ecm")
@@ -737,6 +797,12 @@ async def prefix_ecm(ctx):
         inline=False
     )
 
+embed.add_field(
+        name="!np",
+        value="If connected will use your current spotify song.",
+        inline=False
+    )
+
     embed.add_field(
         name="!affirm",
         value="A reminder if ever needed",
@@ -751,6 +817,31 @@ async def prefix_affirm(ctx, category: str = None):
     view = AffirmationView(category=selected)
     await ctx.send(embed=view.get_embed(), view=view)
     
+    @bot.command(name="np")
+async def now_playing(ctx):
+
+    if not ctx.author.activities:
+        await ctx.send("No activity detected.")
+        return
+
+    for activity in ctx.author.activities:
+        if isinstance(activity, discord.Spotify):
+
+            query = f"{activity.title} {activity.artist}"
+
+            song_data = await fetch_song_links(query, ctx)
+            lyrics_data = await fetch_lyrics(query)
+
+            if song_data:
+                await send_songlink_embed(ctx, song_data)
+
+            if lyrics_data:
+                await send_lyrics_embed(ctx, lyrics_data)
+
+            return
+
+    await ctx.send("You are not listening to Spotify.")
+
 # ---------------------------
 # Slash Commands
 # ---------------------------
@@ -804,41 +895,32 @@ async def slash_weird(interaction: discord.Interaction):
 
 @tree.command(
     name="sl",
-    description="Song platform links",
+    description="Song links + lyrics",
     guild=discord.Object(id=GUILD_ID)
 )
 async def slash_songlink(interaction: discord.Interaction, query: str):
 
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
-
         await interaction.response.send_message(
             "Not allowed here.",
             ephemeral=True
         )
-
         return
 
     await interaction.response.defer()
 
-    data = await fetch_song_links(
-        query,
-        interaction,
-        is_slash=True
-    )
+    song_data = await fetch_song_links(query, interaction, is_slash=True)
+    lyrics_data = await fetch_lyrics(query)
 
-    if not data:
-
-        await interaction.followup.send(
-            "Could not find links."
-        )
-
+    if not song_data and not lyrics_data:
+        await interaction.followup.send("Nothing found.")
         return
 
-    await send_songlink_embed(
-        interaction,
-        data,
-        is_slash=True
-    )
+    if song_data:
+        await send_songlink_embed(interaction, song_data, is_slash=True)
+
+    if lyrics_data:
+        await send_lyrics_embed(interaction, lyrics_data, is_slash=True)
 
 
 # ---------------------------
