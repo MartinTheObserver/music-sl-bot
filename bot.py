@@ -154,38 +154,50 @@ async def fetch_song_links(query, ctx, is_slash=False):
         return None
 
 
-async def send_songlink_embed(ctx, song_data, is_slash=False):
+async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
+    entity_id = None
+    for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
+        if entity.get("type") == "song":
+            entity_id = uid
+            break
+    if not entity_id:
+        msg = "Could not parse song data."
+        if is_slash:
+            await ctx_or_interaction.followup.send(msg)
+        else:
+            await ctx_or_interaction.send(msg)
+        return
 
-    embed = discord.Embed(
-        title="Song Links",
-        color=discord.Color.green()
+    song = song_data["entitiesByUniqueId"][entity_id]
+    title = song.get("title", "Unknown Title")
+    artist = song.get("artistName", "Unknown Artist")
+    thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
+    genius_url = get_genius_link(title, artist)
+    platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
+    
+    # Build the platform links as a single string
+    platform_links = "\n".join(
+        f"[{platform.replace('_',' ').title()}]({data['url']})"
+        for platform, data in platforms
+        if isinstance(data, dict) and "url" in data
     )
 
-    for platform, url in song_data["links"].items():
-
-        embed.add_field(
-            name=platform.title(),
-            value=f"[Open]({url})",
-            inline=True
-        )
-
-    if is_slash:
-        await ctx.followup.send(embed=embed)
-    else:
-        await ctx.send(embed=embed)
-
-async def send_lyrics_embed(ctx, data, is_slash=False):
-
+    # Create the embed
     embed = discord.Embed(
-        title=data["title"],
-        description=data["lyrics"],
-        color=discord.Color.success()
+        title=title,
+        url=genius_url if genius_url else None,
+        description=f"by {artist}",
+        color=0x1DB954
     )
+    if thumbnail:
+        embed.set_thumbnail(url=thumbnail)
+    embed.add_field(name="Listen On", value=platform_links or "No links found", inline=False)
 
+    # Send the embed
     if is_slash:
-        await ctx.followup.send(embed=embed)
+        await ctx_or_interaction.followup.send(embed=embed)
     else:
-        await ctx.send(embed=embed)
+        await ctx_or_interaction.send(embed=embed)
 
 # ---------------------------
 # Genius Lyrics Fetch
