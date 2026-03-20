@@ -123,36 +123,58 @@ async def timezone_sync_loop():
         await push_timezones_to_github()
 
 # ---------------------------
-# Song.link API
+# Song.link 
 # ---------------------------
+def clean_song_title(title: str) -> str:
+    if not title:
+        return ""
+    title = re.sub(r"\(feat\.?.*?\)|\[feat\.?.*?\]", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\(.*?Remix.*?\)|\[.*?Remix.*?\]", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"[\[\]\(\)]", "", title)
+    title = re.sub(r"[^\w\s&'-]", "", title)
+    title = re.sub(r"\s+", " ", title)
+    return title.strip()
 
-async def fetch_song_links(query, ctx, is_slash=False):
-
-    url = f"https://api.song.link/v1-alpha.1/links?url={query}"
-
+async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False):
     try:
-        r = requests.get(url)
-
-        if r.status_code != 200:
-            return None
-
+        r = requests.get(
+            "https://api.song.link/v1-alpha.1/links",
+            params={"url": query, "userCountry": "US"},
+            timeout=20
+        )
+        r.raise_for_status()
         data = r.json()
-
-        links = {}
-
-        for platform, info in data["linksByPlatform"].items():
-
-            links[platform] = info["url"]
-
-        return {
-            "title": data["entityUniqueId"],
-            "links": links
-        }
-
+        return data
     except Exception as e:
-        print(e)
+        if is_slash:
+            await ctx_or_interaction.followup.send(f"Error fetching song data: {e}")
+        else:
+            await ctx_or_interaction.send(f"Error fetching song data: {e}")
         return None
 
+def get_genius_link(title: str, artist: str):
+    if not title or not GENIUS_API_KEY:
+        return None
+    clean_title_str = clean_song_title(title)
+    query = f"{clean_title_str} {artist}"
+    try:
+        r = requests.get(
+            "https://api.genius.com/search",
+            params={"q": query},
+            headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+            timeout=20
+        )
+        data = r.json()
+        hits = data.get("response", {}).get("hits", [])
+        for hit in hits:
+            result = hit.get("result", {})
+            result_title = result.get("title", "").lower()
+            result_artist = result.get("primary_artist", {}).get("name", "").lower()
+            if clean_title_str.lower() in result_title and artist.lower() in result_artist:
+                return result.get("url")
+        return hits[0]["result"].get("url") if hits else None
+    except Exception:
+        return None
 
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     entity_id = None
@@ -174,79 +196,39 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     thumbnail = song.get("thumbnailUrl") or song.get("artworkUrl")
     genius_url = get_genius_link(title, artist)
     platforms = list(song_data.get("linksByPlatform", {}).items())[:50]
-    
-    # Build the platform links as a single string
     platform_links = "\n".join(
         f"[{platform.replace('_',' ').title()}]({data['url']})"
         for platform, data in platforms
         if isinstance(data, dict) and "url" in data
     )
 
-    # Create the embed
-    embed = discord.Embed(
-        title=title,
-        url=genius_url if genius_url else None,
-        description=f"by {artist}",
-        color=0x1DB954
-    )
-    if thumbnail:
-        embed.set_thumbnail(url=thumbnail)
-    embed.add_field(name="Listen On", value=platform_links or "No links found", inline=False)
+    # Split into 1000-char chunks
+    chunks, current_chunk = [], ""
+    for line in platform_links.split("\n"):
+        if len(current_chunk) + len(line) + 1 > 1000:
+            chunks.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk += ("\n" if current_chunk else "") + line
+    if current_chunk:
+        chunks.append(current_chunk)
 
-    # Send the embed
-    if is_slash:
-        await ctx_or_interaction.followup.send(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
-
-# ---------------------------
-# Genius Lyrics Fetch
-# ---------------------------
-
-async def fetch_lyrics(query: str):
-    try:
-        headers = {
-            "Authorization": f"Bearer {GENIUS_API_KEY}"
-        }
-
-        search_url = "https://api.genius.com/search"
-        params = {"q": query}
-
-        r = requests.get(search_url, headers=headers, params=params, timeout=10)
-
-        if r.status_code != 200:
-            return None
-
-        data = r.json()
-        hits = data["response"]["hits"]
-
-        if not hits:
-            return None
-
-        song_url = hits[0]["result"]["url"]
-
-        # Scrape lyrics page
-        page = requests.get(song_url, timeout=10)
-        html = page.text
-
-        # Basic lyrics extraction (Genius embeds)
-        lyrics = re.findall(r'<div data-lyrics-container="true".*?>(.*?)</div>', html, re.S)
-
-        clean = []
-        for block in lyrics:
-            text = re.sub("<.*?>", "", block)
-            clean.append(text.strip())
-
-        final = "\n".join(clean).strip()
-
-        return {
-            "title": hits[0]["result"]["full_title"],
-            "lyrics": final[:4000] if final else "Lyrics not found."
-        }
-
-    except Exception as e:
-        print(e)
-        return None
+    for i, chunk in enumerate(chunks):
+        embed = discord.Embed(
+            title=title,
+            url=genius_url if genius_url else None,
+            description=f"by {artist}",
+            color=0x1DB954
+        )
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
+        embed.add_field(name="Listen On", value=chunk, inline=False)
+        if len(chunks) > 1:
+            embed.set_footer(text=f"Page {i+1}/{len(chunks)}")
+        if is_slash:
+            await ctx_or_interaction.followup.send(embed=embed)
+        else:
+            await ctx_or_interaction.send(embed=embed)
 
 # ---------------------------
 # Load Weird Laws Database
@@ -752,23 +734,17 @@ async def prefix_weird(ctx):
 
 @bot.command(name="sl")
 async def prefix_songlink(ctx, *, query: str):
-
     if ctx.channel.id != ALLOWED_CHANNEL_ID:
-        return
+        return  # ignore if wrong channel
 
-    # Fetch both
+    # Fetch song data
     song_data = await fetch_song_links(query, ctx)
-    lyrics_data = await fetch_lyrics(query)
-
-    if not song_data and not lyrics_data:
+    if not song_data:
         await ctx.send("Nothing found.")
         return
 
-    if song_data:
-        await send_songlink_embed(ctx, song_data)
-
-    if lyrics_data:
-        await send_lyrics_embed(ctx, lyrics_data)
+    # Send embed with Genius link + platforms
+    await send_songlink_embed(ctx, song_data)
 
 
 @bot.command(name="ecm")
@@ -810,12 +786,6 @@ async def prefix_ecm(ctx):
     )
 
     embed.add_field(
-        name="!np",
-        value="If connected will use your current spotify song.",
-        inline=False
-    )
-
-    embed.add_field(
         name="!affirm",
         value="A reminder if ever needed",
         inline=False
@@ -828,31 +798,6 @@ async def prefix_affirm(ctx, category: str = None):
     selected = category.lower().replace(" ", "_") if category and category.lower().replace(" ", "_") in CATEGORIES else None
     view = AffirmationView(category=selected)
     await ctx.send(embed=view.get_embed(), view=view)
-    
-@bot.command(name="np")
-async def now_playing(ctx):
-
-    if not ctx.author.activities:
-        await ctx.send("No activity detected.")
-        return
-
-    for activity in ctx.author.activities:
-        if isinstance(activity, discord.Spotify):
-
-            query = f"{activity.title} {activity.artist}"
-
-            song_data = await fetch_song_links(query, ctx)
-            lyrics_data = await fetch_lyrics(query)
-
-            if song_data:
-                await send_songlink_embed(ctx, song_data)
-
-            if lyrics_data:
-                await send_lyrics_embed(ctx, lyrics_data)
-
-            return
-
-    await ctx.send("You are not listening to Spotify.")
 
 # ---------------------------
 # Slash Commands
@@ -907,11 +852,10 @@ async def slash_weird(interaction: discord.Interaction):
 
 @tree.command(
     name="sl",
-    description="Song links + lyrics",
+    description="Song links + Genius",
     guild=discord.Object(id=GUILD_ID)
 )
 async def slash_songlink(interaction: discord.Interaction, query: str):
-
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message(
             "Not allowed here.",
@@ -919,20 +863,17 @@ async def slash_songlink(interaction: discord.Interaction, query: str):
         )
         return
 
+    # Defer to give time for API calls
     await interaction.response.defer()
 
+    # Fetch song data
     song_data = await fetch_song_links(query, interaction, is_slash=True)
-    lyrics_data = await fetch_lyrics(query)
-
-    if not song_data and not lyrics_data:
+    if not song_data:
         await interaction.followup.send("Nothing found.")
         return
 
-    if song_data:
-        await send_songlink_embed(interaction, song_data, is_slash=True)
-
-    if lyrics_data:
-        await send_lyrics_embed(interaction, lyrics_data, is_slash=True)
+    # Send embed with Genius link + platforms
+    await send_songlink_embed(interaction, song_data, is_slash=True)
 
 
 # ---------------------------
