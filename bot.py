@@ -817,7 +817,7 @@ async def prefix_affirm(ctx, category: str = None):
     view = AffirmationView(category=selected)
     await ctx.send(embed=view.get_embed(), view=view)
     
-    @bot.command(name="np")
+@bot.command(name="np")
 async def now_playing(ctx):
 
     if not ctx.author.activities:
