@@ -797,19 +797,19 @@ async def prefix_ecm(ctx):
         inline=False
     )
 
-embed.add_field(
+    embed.add_field(
         name="!np",
         value="If connected will use your current spotify song.",
         inline=False
     )
 
-embed.add_field(
+    embed.add_field(
         name="!affirm",
         value="A reminder if ever needed",
         inline=False
     )
 
-await ctx.send(embed=embed)
+    await ctx.send(embed=embed)
 
 @bot.command(name="affirm")
 async def prefix_affirm(ctx, category: str = None):
