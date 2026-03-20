@@ -803,7 +803,7 @@ embed.add_field(
         inline=False
     )
 
-    embed.add_field(
+embed.add_field(
         name="!affirm",
         value="A reminder if ever needed",
         inline=False
