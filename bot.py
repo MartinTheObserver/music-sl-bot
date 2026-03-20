@@ -809,7 +809,7 @@ embed.add_field(
         inline=False
     )
 
-    await ctx.send(embed=embed)
+await ctx.send(embed=embed)
 
 @bot.command(name="affirm")
 async def prefix_affirm(ctx, category: str = None):
