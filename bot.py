@@ -7,6 +7,9 @@ import random
 import requests
 import discord
 
+from flask import Flask
+import threading
+
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button, Modal, TextInput
@@ -903,6 +906,22 @@ async def on_ready():
 
     print("Commands synced")
 
+# ---------------------------
+# Keep-Alive Web Server
+# ---------------------------
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is alive."
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# Start Flask in background thread
+threading.Thread(target=run_flask).start()
 
 # ---------------------------
 # Start Bot
