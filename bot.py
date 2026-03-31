@@ -27,10 +27,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
 API_NINJA_RANDOM_WORD_KEY = os.getenv("API_NINJA_RANDOM_WORD_KEY")
-
 GUILD_ID = int(os.getenv("GUILD_ID"))
-ALLOWED_CHANNEL_ID = int(os.getenv("ALLOWED_CHANNEL_ID"))
-
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_FILE = os.getenv("GITHUB_FILE", "timezones.json")
@@ -737,8 +734,6 @@ async def prefix_weird(ctx):
 
 @bot.command(name="sl")
 async def prefix_songlink(ctx, *, query: str):
-    if ctx.channel.id != ALLOWED_CHANNEL_ID:
-        return  # ignore if wrong channel
 
     # Fetch song data
     song_data = await fetch_song_links(query, ctx)
@@ -856,12 +851,6 @@ async def slash_weird(interaction: discord.Interaction):
     description="Song links + Genius"
 )
 async def slash_songlink(interaction: discord.Interaction, query: str):
-    if interaction.channel_id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message(
-            "Not allowed here.",
-            ephemeral=True
-        )
-        return
 
     # Defer to give time for API calls
     await interaction.response.defer()
