@@ -821,8 +821,7 @@ async def slash_word(interaction: discord.Interaction):
 
 @tree.command(
     name="quote",
-    description="Random quote",
-    guild=discord.Object(id=GUILD_ID)
+    description="Random quote"
 )
 async def slash_quote(interaction: discord.Interaction):
 
@@ -838,8 +837,7 @@ async def slash_quote(interaction: discord.Interaction):
 
 @tree.command(
     name="weird",
-    description="Random weird law",
-    guild=discord.Object(id=GUILD_ID)
+    description="Random weird law"
 )
 async def slash_weird(interaction: discord.Interaction):
 
@@ -855,8 +853,7 @@ async def slash_weird(interaction: discord.Interaction):
 
 @tree.command(
     name="sl",
-    description="Song links + Genius",
-    guild=discord.Object(id=GUILD_ID)
+    description="Song links + Genius"
 )
 async def slash_songlink(interaction: discord.Interaction, query: str):
     if interaction.channel_id != ALLOWED_CHANNEL_ID:
@@ -877,6 +874,55 @@ async def slash_songlink(interaction: discord.Interaction, query: str):
 
     # Send embed with Genius link + platforms
     await send_songlink_embed(interaction, song_data, is_slash=True)
+
+
+@tree.command(
+    name="time",
+    description="Interactive server timezone viewer"
+)
+async def slash_time(interaction: discord.Interaction):
+
+    embed = await build_timezone_embed(
+        interaction.user,
+        interaction.guild
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=TimezoneView()
+    )
+
+
+@tree.command(
+    name="affirm",
+    description="A reminder if ever needed"
+)
+async def slash_affirm(interaction: discord.Interaction, category: str = None):
+    selected = category.lower().replace(" ", "_") if category and category.lower().replace(" ", "_") in CATEGORIES else None
+    view = AffirmationView(category=selected)
+    await interaction.response.send_message(
+        embed=view.get_embed(),
+        view=view
+    )
+
+
+@tree.command(
+    name="ecm",
+    description="View all available commands"
+)
+async def slash_ecm(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="Commands",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="/time", value="Interactive server timezone viewer", inline=False)
+    embed.add_field(name="/word", value="Random word", inline=False)
+    embed.add_field(name="/quote", value="Random quote", inline=False)
+    embed.add_field(name="/weird", value="Random weird law", inline=False)
+    embed.add_field(name="/sl <query>", value="Song platform links", inline=False)
+    embed.add_field(name="/affirm [category]", value="A reminder if ever needed", inline=False)
+    embed.add_field(name="/ecm", value="View this help message", inline=False)
+    await interaction.response.send_message(embed=embed)
 
 
 # ---------------------------
