@@ -802,8 +802,6 @@ async def prefix_affirm(ctx, category: str = None):
 # ---------------------------
 
 @tree.command(name="word", description="Random word")
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
 async def slash_word(interaction: discord.Interaction):
 
     view = WordView()
@@ -820,8 +818,6 @@ async def slash_word(interaction: discord.Interaction):
     name="quote",
     description="Random quote"
 )
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
 async def slash_quote(interaction: discord.Interaction):
 
     view = ZenQuoteView()
@@ -838,8 +834,6 @@ async def slash_quote(interaction: discord.Interaction):
     name="weird",
     description="Random weird law"
 )
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
 async def slash_weird(interaction: discord.Interaction):
 
     laws = list(WEIRD_LAWS.values())
@@ -856,8 +850,6 @@ async def slash_weird(interaction: discord.Interaction):
     name="sl",
     description="Song links + Genius"
 )
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
 async def slash_songlink(interaction: discord.Interaction, query: str):
 
     # Defer to give time for API calls
@@ -894,8 +886,6 @@ async def slash_time(interaction: discord.Interaction):
     name="affirm",
     description="A reminder if ever needed"
 )
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@app_commands.allowed_installs(guilds=True, users=True)
 async def slash_affirm(interaction: discord.Interaction, category: str = None):
     selected = category.lower().replace(" ", "_") if category and category.lower().replace(" ", "_") in CATEGORIES else None
     view = AffirmationView(category=selected)
