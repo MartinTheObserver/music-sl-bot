@@ -182,7 +182,7 @@ def get_genius_link(title: str, artist: str):
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     entity_id = None
     for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
-        if entity.get("type") == "song":
+        if entity.get("type") == ["song", "album"]:
             entity_id = uid
             break
     if not entity_id:
