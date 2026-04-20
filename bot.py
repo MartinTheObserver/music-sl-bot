@@ -138,7 +138,7 @@ def clean_song_title(title: str) -> str:
 async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False):
     try:
         if "spotify.com" in query.lower():
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(1.0)
 
         r = requests.get(
             "https://api.song.link/v1-alpha.1/links",
