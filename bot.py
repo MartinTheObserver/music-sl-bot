@@ -181,9 +181,7 @@ def detect_playlist_url(query: str):
 async def parse_spotify_playlist(playlist_url: str):
     """Parse Spotify playlist and return normalized tracks"""
     try:
-        # Extract playlist ID - handle both formats:
-        # https://open.spotify.com/playlist/4OOSfk21nBzI7kHVzOQgdm
-        # https://open.spotify.com/playlist/4OOSfk21nBzI7kHVzOQgdm?si=...
+        # Extract playlist ID
         if "/playlist/" in playlist_url:
             playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
         else:
@@ -191,6 +189,11 @@ async def parse_spotify_playlist(playlist_url: str):
         
         if not playlist_id or len(playlist_id) < 10:
             return None, "Could not extract valid Spotify playlist ID"
+        
+        # Validate credentials exist
+        if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+            print(f"DEBUG: SPOTIFY_CLIENT_ID={SPOTIFY_CLIENT_ID is not None}, SPOTIFY_CLIENT_SECRET={SPOTIFY_CLIENT_SECRET is not None}")
+            return None, "Spotify API credentials not configured. Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in environment."
         
         # Get Spotify access token
         auth_url = "https://accounts.spotify.com/api/token"
@@ -200,13 +203,23 @@ async def parse_spotify_playlist(playlist_url: str):
             "client_secret": SPOTIFY_CLIENT_SECRET
         }
         
-        auth_r = requests.post(auth_url, data=auth_data, timeout=10)
-        if auth_r.status_code != 200:
-            return None, "Failed to authenticate with Spotify"
-        
-        access_token = auth_r.json().get("access_token")
-        if not access_token:
-            return None, "No Spotify access token received"
+        try:
+            auth_r = requests.post(auth_url, data=auth_data, timeout=10)
+            print(f"DEBUG: Spotify auth response status: {auth_r.status_code}")
+            print(f"DEBUG: Spotify auth response body: {auth_r.text[:200]}")
+            
+            if auth_r.status_code != 200:
+                error_detail = auth_r.text if auth_r.text else "No response body"
+                return None, f"Spotify authentication failed (HTTP {auth_r.status_code}): {error_detail}"
+            
+            auth_data_response = auth_r.json()
+            access_token = auth_data_response.get("access_token")
+            
+            if not access_token:
+                return None, "Spotify API did not return access token. Check credentials."
+            
+        except Exception as e:
+            return None, f"Spotify token request error: {str(e)}"
         
         headers = {"Authorization": f"Bearer {access_token}"}
         
@@ -217,7 +230,7 @@ async def parse_spotify_playlist(playlist_url: str):
             timeout=10
         )
         if playlist_r.status_code != 200:
-            error_msg = playlist_r.json().get("error", {}).get("message", "Unknown error")
+            error_msg = playlist_r.json().get("error", {}).get("message", "Unknown error") if playlist_r.text else "No response body"
             return None, f"Playlist not found: {error_msg}"
         
         playlist_data = playlist_r.json()
