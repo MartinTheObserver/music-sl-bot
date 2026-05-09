@@ -37,7 +37,6 @@ GITHUB_FILE = os.getenv("GITHUB_FILE", "timezones.json")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-APPLE_MUSIC_TOKEN = os.getenv("APPLE_MUSIC_TOKEN")
 
 # ---------------------------
 # Discord Setup
@@ -176,8 +175,6 @@ def detect_playlist_url(query: str):
         return "spotify"
     elif "youtube.com/playlist" in query_lower or "youtu.be" in query_lower:
         return "youtube"
-    elif "music.apple.com" in query_lower and "playlist" in query_lower:
-        return "apple_music"
     return None
 
 async def parse_spotify_playlist(playlist_url: str):
@@ -320,55 +317,6 @@ async def parse_youtube_playlist(playlist_url: str):
     
     except Exception as e:
         return None, f"Error parsing YouTube playlist: {str(e)}"
-
-async def parse_apple_playlist(playlist_url: str):
-    """Parse Apple Music playlist and return normalized tracks"""
-    try:
-        # Extract playlist ID from URL
-        playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
-        
-        if not APPLE_MUSIC_TOKEN:
-            return None, "Apple Music token not configured"
-        
-        headers = {
-            "Authorization": f"Bearer {APPLE_MUSIC_TOKEN}",
-            "Accept": "application/json"
-        }
-        
-        # Fetch playlist metadata
-        playlist_r = requests.get(
-            f"https://api.music.apple.com/v1/catalog/us/playlists/{playlist_id}",
-            headers=headers,
-            params={"include": "tracks"},
-            timeout=10
-        )
-        
-        if playlist_r.status_code != 200:
-            return None, "Playlist not found"
-        
-        playlist_data = playlist_r.json().get("data", [{}])[0]
-        playlist_title = playlist_data.get("attributes", {}).get("name", "Unknown Playlist")
-        playlist_thumbnail = playlist_data.get("attributes", {}).get("artwork", {}).get("url", "")
-        
-        # Extract tracks
-        tracks = []
-        track_data = playlist_data.get("relationships", {}).get("tracks", {}).get("data", [])
-        
-        for track_item in track_data:
-            track_attrs = track_item.get("attributes", {})
-            normalized = normalize_track_data(
-                title=track_attrs.get("name", ""),
-                artist=track_attrs.get("artistName", ""),
-                album=track_attrs.get("albumName", ""),
-                url=track_attrs.get("url", ""),
-                thumbnail=track_attrs.get("artwork", {}).get("url", "")
-            )
-            tracks.append(normalized)
-        
-        return (tracks, playlist_title, playlist_thumbnail), None
-    
-    except Exception as e:
-        return None, f"Error parsing Apple Music playlist: {str(e)}"
 
 # ---------------------------
 # Song.link 
@@ -576,8 +524,7 @@ def create_playlist_embed(playlist_title, platform, total_tracks, preview_tracks
     """Create an embed showing playlist info and track preview"""
     platform_icons = {
         "spotify": "🎵",
-        "youtube": "📺",
-        "apple_music": "🍎"
+        "youtube": "📺"
     }
     
     icon = platform_icons.get(platform, "🎵")
@@ -1115,8 +1062,6 @@ async def prefix_songlink(ctx, *, query: str):
             result, error = await parse_spotify_playlist(query)
         elif playlist_platform == "youtube":
             result, error = await parse_youtube_playlist(query)
-        elif playlist_platform == "apple_music":
-            result, error = await parse_apple_playlist(query)
         else:
             await ctx.send("Unsupported playlist platform.")
             return
@@ -1291,8 +1236,6 @@ async def slash_songlink(interaction: discord.Interaction, query: str):
             result, error = await parse_spotify_playlist(query)
         elif playlist_platform == "youtube":
             result, error = await parse_youtube_playlist(query)
-        elif playlist_platform == "apple_music":
-            result, error = await parse_apple_playlist(query)
         else:
             await interaction.followup.send("Unsupported playlist platform.")
             return
