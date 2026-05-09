@@ -702,7 +702,7 @@ class ZenQuoteView(View):
     def create_embed(self):
         embed = discord.Embed(
             title="💬 Random Quote",
-            description=f""{self.quote_text}"\n\n— {self.author}" if self.author else f""{self.quote_text}"",
+            description=f'"{self.quote_text}"\n\n— {self.author}' if self.author else f'"{self.quote_text}"',
             color=discord.Color.dark_grey()
         )
         return embed
