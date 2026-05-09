@@ -35,8 +35,6 @@ GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_FILE = os.getenv("GITHUB_FILE", "timezones.json")
 
 # Playlist API Keys
-SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 # ---------------------------
@@ -172,103 +170,9 @@ def normalize_track_data(title, artist, album="", url="", isrc="", thumbnail="")
 def detect_playlist_url(query: str):
     """Detect if query is a playlist URL and return platform"""
     query_lower = query.lower()
-    if "spotify.com/playlist" in query_lower:
-        return "spotify"
-    elif "youtube.com/playlist" in query_lower or "youtu.be" in query_lower:
+    if "youtube.com/playlist" in query_lower or "youtu.be" in query_lower:
         return "youtube"
     return None
-
-async def parse_spotify_playlist(playlist_url: str):
-    """Parse Spotify playlist and return normalized tracks"""
-    try:
-        # Extract playlist ID
-        if "/playlist/" in playlist_url:
-            playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
-        else:
-            return None, "Invalid Spotify playlist URL format"
-        
-        if not playlist_id or len(playlist_id) < 10:
-            return None, "Could not extract valid Spotify playlist ID"
-        
-        # Validate credentials exist
-        if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
-            print(f"DEBUG: SPOTIFY_CLIENT_ID={SPOTIFY_CLIENT_ID is not None}, SPOTIFY_CLIENT_SECRET={SPOTIFY_CLIENT_SECRET is not None}")
-            return None, "Spotify API credentials not configured. Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in environment."
-        
-        # Get Spotify access token
-        auth_url = "https://accounts.spotify.com/api/token"
-        auth_data = {
-            "grant_type": "client_credentials",
-            "client_id": SPOTIFY_CLIENT_ID,
-            "client_secret": SPOTIFY_CLIENT_SECRET
-        }
-        
-        try:
-            auth_r = requests.post(auth_url, data=auth_data, timeout=10)
-            print(f"DEBUG: Spotify auth response status: {auth_r.status_code}")
-            print(f"DEBUG: Spotify auth response body: {auth_r.text[:200]}")
-            
-            if auth_r.status_code != 200:
-                error_detail = auth_r.text if auth_r.text else "No response body"
-                return None, f"Spotify authentication failed (HTTP {auth_r.status_code}): {error_detail}"
-            
-            auth_data_response = auth_r.json()
-            access_token = auth_data_response.get("access_token")
-            
-            if not access_token:
-                return None, "Spotify API did not return access token. Check credentials."
-            
-        except Exception as e:
-            return None, f"Spotify token request error: {str(e)}"
-        
-        headers = {"Authorization": f"Bearer {access_token}"}
-        
-        # Fetch playlist metadata
-        playlist_r = requests.get(
-            f"https://api.spotify.com/v1/playlists/{playlist_id}",
-            headers=headers,
-            timeout=10
-        )
-        if playlist_r.status_code != 200:
-            error_msg = playlist_r.json().get("error", {}).get("message", "Unknown error") if playlist_r.text else "No response body"
-            return None, f"Playlist not found: {error_msg}"
-        
-        playlist_data = playlist_r.json()
-        playlist_title = playlist_data.get("name", "Unknown Playlist")
-        playlist_thumbnail = None
-        if playlist_data.get("images"):
-            playlist_thumbnail = playlist_data["images"][0].get("url")
-        
-        # Fetch all tracks with pagination
-        tracks = []
-        url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
-        
-        while url:
-            r = requests.get(url, headers=headers, timeout=10)
-            if r.status_code != 200:
-                break
-            
-            data = r.json()
-            for item in data.get("items", []):
-                track = item.get("track", {})
-                if track:
-                    artists = ", ".join([a.get("name", "") for a in track.get("artists", [])])
-                    normalized = normalize_track_data(
-                        title=track.get("name", ""),
-                        artist=artists,
-                        album=track.get("album", {}).get("name", ""),
-                        url=track.get("external_urls", {}).get("spotify", ""),
-                        isrc=track.get("external_ids", {}).get("isrc", ""),
-                        thumbnail=track.get("album", {}).get("images", [{}])[0].get("url", "")
-                    )
-                    tracks.append(normalized)
-            
-            url = data.get("next")
-        
-        return (tracks, playlist_title, playlist_thumbnail), None
-    
-    except Exception as e:
-        return None, f"Error parsing Spotify playlist: {str(e)}"
 
 async def parse_youtube_playlist(playlist_url: str):
     """Parse YouTube playlist and return normalized tracks"""
