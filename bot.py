@@ -7,6 +7,7 @@ import random
 import requests
 import discord
 import uuid
+from urllib.parse import urlparse, parse_qs
 
 from flask import Flask
 import threading
@@ -180,8 +181,16 @@ def detect_playlist_url(query: str):
 async def parse_spotify_playlist(playlist_url: str):
     """Parse Spotify playlist and return normalized tracks"""
     try:
-        # Extract playlist ID
-        playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
+        # Extract playlist ID - handle both formats:
+        # https://open.spotify.com/playlist/4OOSfk21nBzI7kHVzOQgdm
+        # https://open.spotify.com/playlist/4OOSfk21nBzI7kHVzOQgdm?si=...
+        if "/playlist/" in playlist_url:
+            playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
+        else:
+            return None, "Invalid Spotify playlist URL format"
+        
+        if not playlist_id or len(playlist_id) < 10:
+            return None, "Could not extract valid Spotify playlist ID"
         
         # Get Spotify access token
         auth_url = "https://accounts.spotify.com/api/token"
@@ -196,6 +205,9 @@ async def parse_spotify_playlist(playlist_url: str):
             return None, "Failed to authenticate with Spotify"
         
         access_token = auth_r.json().get("access_token")
+        if not access_token:
+            return None, "No Spotify access token received"
+        
         headers = {"Authorization": f"Bearer {access_token}"}
         
         # Fetch playlist metadata
@@ -205,7 +217,8 @@ async def parse_spotify_playlist(playlist_url: str):
             timeout=10
         )
         if playlist_r.status_code != 200:
-            return None, "Playlist not found"
+            error_msg = playlist_r.json().get("error", {}).get("message", "Unknown error")
+            return None, f"Playlist not found: {error_msg}"
         
         playlist_data = playlist_r.json()
         playlist_title = playlist_data.get("name", "Unknown Playlist")
