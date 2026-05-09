@@ -6,13 +6,14 @@ import asyncio
 import random
 import requests
 import discord
+import uuid
 
 from flask import Flask
 import threading
 
 from discord.ext import commands
 from discord import app_commands
-from discord.ui import View, Button, Modal, TextInput
+from discord.ui import View, Button, Modal, TextInput, Select
 
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
@@ -31,6 +32,12 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_FILE = os.getenv("GITHUB_FILE", "timezones.json")
+
+# Playlist API Keys
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+APPLE_MUSIC_TOKEN = os.getenv("APPLE_MUSIC_TOKEN")
 
 # ---------------------------
 # Discord Setup
@@ -123,6 +130,247 @@ async def timezone_sync_loop():
         await push_timezones_to_github()
 
 # ---------------------------
+# Playlist Session Management
+# ---------------------------
+
+playlist_sessions = {}
+
+def create_playlist_session(tracks, platform, title, thumbnail=None):
+    """Create a session for a playlist and return session ID"""
+    session_id = str(uuid.uuid4())
+    playlist_sessions[session_id] = {
+        "tracks": tracks,
+        "platform": platform,
+        "title": title,
+        "thumbnail": thumbnail,
+        "created_at": datetime.now()
+    }
+    return session_id
+
+def get_playlist_session(session_id):
+    """Retrieve playlist session data"""
+    if session_id in playlist_sessions:
+        session = playlist_sessions[session_id]
+        # Clean up old sessions (30+ minutes)
+        if (datetime.now() - session["created_at"]).total_seconds() > 1800:
+            del playlist_sessions[session_id]
+            return None
+        return session
+    return None
+
+def normalize_track_data(title, artist, album="", url="", isrc="", thumbnail=""):
+    """Normalize track data across platforms"""
+    return {
+        "title": title or "Unknown Title",
+        "artist": artist or "Unknown Artist",
+        "album": album or "",
+        "url": url or "",
+        "isrc": isrc or "",
+        "thumbnail": thumbnail or ""
+    }
+
+def detect_playlist_url(query: str):
+    """Detect if query is a playlist URL and return platform"""
+    query_lower = query.lower()
+    if "spotify.com/playlist" in query_lower:
+        return "spotify"
+    elif "youtube.com/playlist" in query_lower or "youtu.be" in query_lower:
+        return "youtube"
+    elif "music.apple.com" in query_lower and "playlist" in query_lower:
+        return "apple_music"
+    return None
+
+async def parse_spotify_playlist(playlist_url: str):
+    """Parse Spotify playlist and return normalized tracks"""
+    try:
+        # Extract playlist ID
+        playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
+        
+        # Get Spotify access token
+        auth_url = "https://accounts.spotify.com/api/token"
+        auth_data = {
+            "grant_type": "client_credentials",
+            "client_id": SPOTIFY_CLIENT_ID,
+            "client_secret": SPOTIFY_CLIENT_SECRET
+        }
+        
+        auth_r = requests.post(auth_url, data=auth_data, timeout=10)
+        if auth_r.status_code != 200:
+            return None, "Failed to authenticate with Spotify"
+        
+        access_token = auth_r.json().get("access_token")
+        headers = {"Authorization": f"Bearer {access_token}"}
+        
+        # Fetch playlist metadata
+        playlist_r = requests.get(
+            f"https://api.spotify.com/v1/playlists/{playlist_id}",
+            headers=headers,
+            timeout=10
+        )
+        if playlist_r.status_code != 200:
+            return None, "Playlist not found"
+        
+        playlist_data = playlist_r.json()
+        playlist_title = playlist_data.get("name", "Unknown Playlist")
+        playlist_thumbnail = None
+        if playlist_data.get("images"):
+            playlist_thumbnail = playlist_data["images"][0].get("url")
+        
+        # Fetch all tracks with pagination
+        tracks = []
+        url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
+        
+        while url:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code != 200:
+                break
+            
+            data = r.json()
+            for item in data.get("items", []):
+                track = item.get("track", {})
+                if track:
+                    artists = ", ".join([a.get("name", "") for a in track.get("artists", [])])
+                    normalized = normalize_track_data(
+                        title=track.get("name", ""),
+                        artist=artists,
+                        album=track.get("album", {}).get("name", ""),
+                        url=track.get("external_urls", {}).get("spotify", ""),
+                        isrc=track.get("external_ids", {}).get("isrc", ""),
+                        thumbnail=track.get("album", {}).get("images", [{}])[0].get("url", "")
+                    )
+                    tracks.append(normalized)
+            
+            url = data.get("next")
+        
+        return (tracks, playlist_title, playlist_thumbnail), None
+    
+    except Exception as e:
+        return None, f"Error parsing Spotify playlist: {str(e)}"
+
+async def parse_youtube_playlist(playlist_url: str):
+    """Parse YouTube playlist and return normalized tracks"""
+    try:
+        # Extract playlist ID
+        if "?list=" in playlist_url:
+            playlist_id = playlist_url.split("?list=")[1].split("&")[0]
+        else:
+            return None, "Invalid YouTube playlist URL"
+        
+        if not YOUTUBE_API_KEY:
+            return None, "YouTube API key not configured"
+        
+        # Fetch playlist metadata
+        playlist_r = requests.get(
+            "https://www.googleapis.com/youtube/v3/playlists",
+            params={
+                "part": "snippet",
+                "id": playlist_id,
+                "key": YOUTUBE_API_KEY
+            },
+            timeout=10
+        )
+        
+        if playlist_r.status_code != 200:
+            return None, "Playlist not found"
+        
+        items = playlist_r.json().get("items", [])
+        if not items:
+            return None, "Playlist not found"
+        
+        playlist_data = items[0].get("snippet", {})
+        playlist_title = playlist_data.get("title", "Unknown Playlist")
+        playlist_thumbnail = playlist_data.get("thumbnails", {}).get("high", {}).get("url")
+        
+        # Fetch all tracks with pagination
+        tracks = []
+        next_page_token = None
+        
+        while True:
+            r = requests.get(
+                "https://www.googleapis.com/youtube/v3/playlistItems",
+                params={
+                    "part": "snippet",
+                    "playlistId": playlist_id,
+                    "maxResults": 50,
+                    "pageToken": next_page_token,
+                    "key": YOUTUBE_API_KEY
+                },
+                timeout=10
+            )
+            
+            if r.status_code != 200:
+                break
+            
+            data = r.json()
+            for item in data.get("items", []):
+                snippet = item.get("snippet", {})
+                normalized = normalize_track_data(
+                    title=snippet.get("title", ""),
+                    artist=snippet.get("videoOwnerChannelTitle", ""),
+                    url=f"https://youtu.be/{snippet.get('resourceId', {}).get('videoId', '')}",
+                    thumbnail=snippet.get("thumbnails", {}).get("high", {}).get("url", "")
+                )
+                tracks.append(normalized)
+            
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                break
+        
+        return (tracks, playlist_title, playlist_thumbnail), None
+    
+    except Exception as e:
+        return None, f"Error parsing YouTube playlist: {str(e)}"
+
+async def parse_apple_playlist(playlist_url: str):
+    """Parse Apple Music playlist and return normalized tracks"""
+    try:
+        # Extract playlist ID from URL
+        playlist_id = playlist_url.split("/playlist/")[1].split("?")[0]
+        
+        if not APPLE_MUSIC_TOKEN:
+            return None, "Apple Music token not configured"
+        
+        headers = {
+            "Authorization": f"Bearer {APPLE_MUSIC_TOKEN}",
+            "Accept": "application/json"
+        }
+        
+        # Fetch playlist metadata
+        playlist_r = requests.get(
+            f"https://api.music.apple.com/v1/catalog/us/playlists/{playlist_id}",
+            headers=headers,
+            params={"include": "tracks"},
+            timeout=10
+        )
+        
+        if playlist_r.status_code != 200:
+            return None, "Playlist not found"
+        
+        playlist_data = playlist_r.json().get("data", [{}])[0]
+        playlist_title = playlist_data.get("attributes", {}).get("name", "Unknown Playlist")
+        playlist_thumbnail = playlist_data.get("attributes", {}).get("artwork", {}).get("url", "")
+        
+        # Extract tracks
+        tracks = []
+        track_data = playlist_data.get("relationships", {}).get("tracks", {}).get("data", [])
+        
+        for track_item in track_data:
+            track_attrs = track_item.get("attributes", {})
+            normalized = normalize_track_data(
+                title=track_attrs.get("name", ""),
+                artist=track_attrs.get("artistName", ""),
+                album=track_attrs.get("albumName", ""),
+                url=track_attrs.get("url", ""),
+                thumbnail=track_attrs.get("artwork", {}).get("url", "")
+            )
+            tracks.append(normalized)
+        
+        return (tracks, playlist_title, playlist_thumbnail), None
+    
+    except Exception as e:
+        return None, f"Error parsing Apple Music playlist: {str(e)}"
+
+# ---------------------------
 # Song.link 
 # ---------------------------
 def clean_song_title(title: str) -> str:
@@ -155,6 +403,20 @@ async def fetch_song_links(query: str, ctx_or_interaction=None, is_slash=False):
             await ctx_or_interaction.send(f"Error fetching song data: {e}")
         return None
 
+async def fetch_odesli_links(track_url: str):
+    """Fetch Odesli links for a specific track"""
+    try:
+        r = requests.get(
+            "https://api.song.link/v1-alpha.1/links",
+            params={"url": track_url, "userCountry": "US"},
+            timeout=20
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"Error fetching Odesli links: {e}")
+        return None
+
 def get_genius_link(title: str, artist: str):
     if not title or not GENIUS_API_KEY:
         return None
@@ -182,7 +444,7 @@ def get_genius_link(title: str, artist: str):
 async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
     entity_id = None
     for uid, entity in song_data.get("entitiesByUniqueId", {}).items():
-        if entity.get("type") == ["song", "album"]:
+        if entity.get("type") in ["song", "album"]:
             entity_id = uid
             break
     if not entity_id:
@@ -232,6 +494,110 @@ async def send_songlink_embed(ctx_or_interaction, song_data, is_slash=False):
             await ctx_or_interaction.followup.send(embed=embed)
         else:
             await ctx_or_interaction.send(embed=embed)
+
+# ---------------------------
+# Playlist UI Components
+# ---------------------------
+
+class PlaylistTrackSelect(discord.ui.Select):
+    """Dropdown for selecting a track from a playlist chunk"""
+    def __init__(self, session_id, chunk_index, tracks_chunk, playlist_title, platform):
+        options = []
+        for i, track in enumerate(tracks_chunk):
+            label = f"{track['title'][:70]}"
+            description = f"{track['artist'][:60]}"
+            options.append(discord.SelectOption(
+                label=label,
+                description=description,
+                value=f"{session_id}|{chunk_index}|{i}"
+            ))
+        
+        super().__init__(
+            placeholder=f"Select a song from {playlist_title}...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"playlist_select_{session_id}_{chunk_index}"
+        )
+        self.session_id = session_id
+        self.chunk_index = chunk_index
+        self.playlist_title = playlist_title
+        self.platform = platform
+    
+    async def callback(self, interaction: discord.Interaction):
+        session = get_playlist_session(self.session_id)
+        if not session:
+            await interaction.response.send_message(
+                "Session expired. Please request the playlist again.",
+                ephemeral=True
+            )
+            return
+        
+        session_id, chunk_index, track_index = self.values[0].split("|")
+        track_index = int(track_index)
+        chunk_index = int(chunk_index)
+        
+        # Calculate global track index
+        global_index = chunk_index * 25 + track_index
+        
+        if global_index >= len(session["tracks"]):
+            await interaction.response.send_message(
+                "Track not found in session.",
+                ephemeral=True
+            )
+            return
+        
+        track = session["tracks"][global_index]
+        
+        await interaction.response.defer()
+        
+        # Fetch Odesli links for the selected track
+        if track["url"]:
+            song_data = await fetch_odesli_links(track["url"])
+            if song_data:
+                await send_songlink_embed(interaction, song_data, is_slash=True)
+            else:
+                await interaction.followup.send(
+                    f"Could not fetch cross-platform links for: **{track['title']}** by {track['artist']}"
+                )
+        else:
+            await interaction.followup.send(
+                f"No URL available for: **{track['title']}** by {track['artist']}"
+            )
+
+class PlaylistView(discord.ui.View):
+    """View containing playlist track dropdown"""
+    def __init__(self, session_id, chunk_index, tracks_chunk, playlist_title, platform):
+        super().__init__(timeout=None)
+        select = PlaylistTrackSelect(session_id, chunk_index, tracks_chunk, playlist_title, platform)
+        self.add_item(select)
+
+def create_playlist_embed(playlist_title, platform, total_tracks, preview_tracks, thumbnail=None):
+    """Create an embed showing playlist info and track preview"""
+    platform_icons = {
+        "spotify": "🎵",
+        "youtube": "📺",
+        "apple_music": "🍎"
+    }
+    
+    icon = platform_icons.get(platform, "🎵")
+    
+    embed = discord.Embed(
+        title=f"{icon} {playlist_title}",
+        description=f"**Platform:** {platform.replace('_', ' ').title()}\n**Total Tracks:** {total_tracks}",
+        color=0x1DB954
+    )
+    
+    preview_text = "\n".join([f"• {track['title'][:60]} - {track['artist'][:40]}" for track in preview_tracks[:10]])
+    if len(preview_tracks) > 10:
+        preview_text += f"\n• ... and {len(preview_tracks) - 10} more"
+    
+    embed.add_field(name="Track Preview", value=preview_text or "No tracks", inline=False)
+    
+    if thumbnail:
+        embed.set_thumbnail(url=thumbnail)
+    
+    return embed
 
 # ---------------------------
 # Load Weird Laws Database
@@ -389,7 +755,7 @@ class ZenQuoteView(View):
     def create_embed(self):
         embed = discord.Embed(
             title="💬 Random Quote",
-            description=f"“{self.quote_text}”\n\n— {self.author}" if self.author else f"“{self.quote_text}”",
+            description=f""{self.quote_text}"\n\n— {self.author}" if self.author else f""{self.quote_text}"",
             color=discord.Color.dark_grey()
         )
         return embed
@@ -738,14 +1104,73 @@ async def prefix_weird(ctx):
 @bot.command(name="sl")
 async def prefix_songlink(ctx, *, query: str):
 
-    # Fetch song data
-    song_data = await fetch_song_links(query, ctx)
-    if not song_data:
-        await ctx.send("Nothing found.")
-        return
+    # Check if it's a playlist
+    playlist_platform = detect_playlist_url(query)
+    
+    if playlist_platform:
+        await ctx.send("Processing playlist...")
+        
+        # Parse playlist based on platform
+        if playlist_platform == "spotify":
+            result, error = await parse_spotify_playlist(query)
+        elif playlist_platform == "youtube":
+            result, error = await parse_youtube_playlist(query)
+        elif playlist_platform == "apple_music":
+            result, error = await parse_apple_playlist(query)
+        else:
+            await ctx.send("Unsupported playlist platform.")
+            return
+        
+        if error:
+            await ctx.send(f"Error: {error}")
+            return
+        
+        if not result:
+            await ctx.send("Could not parse playlist.")
+            return
+        
+        tracks, playlist_title, thumbnail = result
+        
+        if not tracks:
+            await ctx.send("Playlist is empty.")
+            return
+        
+        # Create session
+        session_id = create_playlist_session(tracks, playlist_platform, playlist_title, thumbnail)
+        
+        # Send messages with dropdowns (25 tracks per message)
+        chunk_size = 25
+        num_chunks = (len(tracks) + chunk_size - 1) // chunk_size
+        
+        for chunk_idx in range(num_chunks):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, len(tracks))
+            chunk = tracks[start_idx:end_idx]
+            
+            # Create embed
+            embed = create_playlist_embed(
+                playlist_title,
+                playlist_platform,
+                len(tracks),
+                chunk,
+                thumbnail
+            )
+            
+            if num_chunks > 1:
+                embed.description += f"\n\n**Dropdown {chunk_idx + 1}/{num_chunks}** (showing tracks {start_idx + 1}-{end_idx})"
+            
+            # Create view with dropdown
+            view = PlaylistView(session_id, chunk_idx, chunk, playlist_title, playlist_platform)
+            
+            await ctx.send(embed=embed, view=view)
+    else:
+        # Single song logic
+        song_data = await fetch_song_links(query, ctx)
+        if not song_data:
+            await ctx.send("Nothing found.")
+            return
 
-    # Send embed with Genius link + platforms
-    await send_songlink_embed(ctx, song_data)
+        await send_songlink_embed(ctx, song_data)
 
 
 @bot.command(name="ecm")
@@ -781,8 +1206,8 @@ async def prefix_ecm(ctx):
     )
 
     embed.add_field(
-        name="!sl <link>",
-        value="Song platform links",
+        name="!sl <link or url>",
+        value="Song platform links or playlist",
         inline=False
     )
 
@@ -851,21 +1276,79 @@ async def slash_weird(interaction: discord.Interaction):
 
 @tree.command(
     name="sl",
-    description="Song links + Genius"
+    description="Song links + Genius or playlist"
 )
 async def slash_songlink(interaction: discord.Interaction, query: str):
 
-    # Defer to give time for API calls
-    await interaction.response.defer()
+    # Check if it's a playlist
+    playlist_platform = detect_playlist_url(query)
+    
+    if playlist_platform:
+        await interaction.response.defer()
+        
+        # Parse playlist based on platform
+        if playlist_platform == "spotify":
+            result, error = await parse_spotify_playlist(query)
+        elif playlist_platform == "youtube":
+            result, error = await parse_youtube_playlist(query)
+        elif playlist_platform == "apple_music":
+            result, error = await parse_apple_playlist(query)
+        else:
+            await interaction.followup.send("Unsupported playlist platform.")
+            return
+        
+        if error:
+            await interaction.followup.send(f"Error: {error}")
+            return
+        
+        if not result:
+            await interaction.followup.send("Could not parse playlist.")
+            return
+        
+        tracks, playlist_title, thumbnail = result
+        
+        if not tracks:
+            await interaction.followup.send("Playlist is empty.")
+            return
+        
+        # Create session
+        session_id = create_playlist_session(tracks, playlist_platform, playlist_title, thumbnail)
+        
+        # Send messages with dropdowns (25 tracks per message)
+        chunk_size = 25
+        num_chunks = (len(tracks) + chunk_size - 1) // chunk_size
+        
+        for chunk_idx in range(num_chunks):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, len(tracks))
+            chunk = tracks[start_idx:end_idx]
+            
+            # Create embed
+            embed = create_playlist_embed(
+                playlist_title,
+                playlist_platform,
+                len(tracks),
+                chunk,
+                thumbnail
+            )
+            
+            if num_chunks > 1:
+                embed.description += f"\n\n**Dropdown {chunk_idx + 1}/{num_chunks}** (showing tracks {start_idx + 1}-{end_idx})"
+            
+            # Create view with dropdown
+            view = PlaylistView(session_id, chunk_idx, chunk, playlist_title, playlist_platform)
+            
+            await interaction.followup.send(embed=embed, view=view)
+    else:
+        # Single song logic
+        await interaction.response.defer()
 
-    # Fetch song data
-    song_data = await fetch_song_links(query, interaction, is_slash=True)
-    if not song_data:
-        await interaction.followup.send("Nothing found.")
-        return
+        song_data = await fetch_song_links(query, interaction, is_slash=True)
+        if not song_data:
+            await interaction.followup.send("Nothing found.")
+            return
 
-    # Send embed with Genius link + platforms
-    await send_songlink_embed(interaction, song_data, is_slash=True)
+        await send_songlink_embed(interaction, song_data, is_slash=True)
 
 
 @tree.command(
@@ -911,7 +1394,7 @@ async def slash_ecm(interaction: discord.Interaction):
     embed.add_field(name="/word", value="Random word", inline=False)
     embed.add_field(name="/quote", value="Random quote", inline=False)
     embed.add_field(name="/weird", value="Random weird law", inline=False)
-    embed.add_field(name="/sl <query>", value="Song platform links", inline=False)
+    embed.add_field(name="/sl <link or url>", value="Song platform links or playlist", inline=False)
     embed.add_field(name="/affirm [category]", value="A reminder if ever needed", inline=False)
     embed.add_field(name="/ecm", value="View this help message", inline=False)
     await interaction.response.send_message(embed=embed)
